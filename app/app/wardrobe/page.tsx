@@ -909,6 +909,20 @@ function UploadModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Let Ctrl/Cmd+V paste a copied image straight into the modal.
+  useEffect(() => {
+    function handlePaste(e: ClipboardEvent) {
+      const item = Array.from(e.clipboardData?.items ?? []).find((i) => i.type.startsWith("image/"));
+      if (!item) return;
+      const file = item.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      handleFile(file);
+    }
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, []);
+
   async function handleFile(file: File) {
     setError(null);
     try {
@@ -952,6 +966,7 @@ function UploadModal({
           <label className="flex flex-col items-center justify-center gap-2 border border-dashed border-neutral-300 rounded-xl h-48 cursor-pointer hover:border-neutral-500 hover:bg-neutral-50 transition duration-200">
             <span className="text-sm text-neutral-500">Click to upload a photo</span>
             <span className="text-xs text-neutral-400">You&apos;ll pick a category next</span>
+            <span className="text-xs text-neutral-300">or paste an image with Ctrl/Cmd+V</span>
             <input
               type="file"
               accept="image/*"
