@@ -53,6 +53,7 @@ interface WardrobeItem {
   imageUrl: string;
   imagePath: string; // storage object path ("<user_id>/<file>.png"), needed to delete the file
   createdAt: number;
+  lastUsedAt: number; // bumped whenever the item is added to the canvas; sorts the sidebar
 }
 
 interface CanvasItem {
@@ -81,6 +82,7 @@ interface Trip {
 
 const CANVAS_WIDTH = 720;
 const CANVAS_HEIGHT = 560;
+const SIDEBAR_PAGE_SIZE = 50;
 
 /* ---------------------------- Utilities --------------------------------- */
 
@@ -93,7 +95,7 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 /** Downscales an upload client-side to keep storage/transfer small. Returns a Blob ready to upload. */
-async function downscaleImage(file: File, maxDimension = 1000): Promise<Blob> {
+async function downscaleImage(file: File, maxDimension = 600): Promise<Blob> {
   const bitmap = await createImageBitmap(file);
   const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
   const width = Math.round(bitmap.width * scale);
@@ -126,6 +128,7 @@ function mapItemRow(row: Row): WardrobeItem {
     imageUrl: row.image_url,
     imagePath: row.image_path,
     createdAt: new Date(row.created_at).getTime(),
+    lastUsedAt: new Date(row.last_used_at ?? row.created_at).getTime(),
   };
 }
 
@@ -277,22 +280,36 @@ function useWardrobeStore() {
     [supabase]
   );
 
-  const addToCanvas = useCallback((itemId: string) => {
-    setCanvasItems((s) => {
-      const maxZ = s.reduce((m, c) => Math.max(m, c.zIndex), 0);
-      const offset = (s.length % 6) * 14;
-      const newCanvasItem: CanvasItem = {
-        id: makeId(),
-        itemId,
-        x: 40 + offset,
-        y: 40 + offset,
-        width: 200,
-        height: 200,
-        zIndex: maxZ + 1,
-      };
-      return [...s, newCanvasItem];
-    });
-  }, []);
+  const addToCanvas = useCallback(
+    (itemId: string) => {
+      setCanvasItems((s) => {
+        const maxZ = s.reduce((m, c) => Math.max(m, c.zIndex), 0);
+        const offset = (s.length % 6) * 14;
+        const newCanvasItem: CanvasItem = {
+          id: makeId(),
+          itemId,
+          x: 40 + offset,
+          y: 40 + offset,
+          width: 200,
+          height: 200,
+          zIndex: maxZ + 1,
+        };
+        return [...s, newCanvasItem];
+      });
+
+      // Record usage so the sidebar can sort by most-recently-used.
+      const usedAt = new Date().toISOString();
+      setItems((s) => s.map((i) => (i.id === itemId ? { ...i, lastUsedAt: new Date(usedAt).getTime() } : i)));
+      supabase
+        .from("wardrobe_items")
+        .update({ last_used_at: usedAt })
+        .eq("id", itemId)
+        .then(({ error }) => {
+          if (error) console.error("Couldn't record item usage:", error);
+        });
+    },
+    [supabase]
+  );
 
   const updateCanvasItem = useCallback((id: string, patch: Partial<CanvasItem>) => {
     setCanvasItems((s) => s.map((c) => (c.id === id ? { ...c, ...patch } : c)));
@@ -516,14 +533,14 @@ function CanvasItemView({
   return (
     <div
       onPointerDown={handleDragPointerDown}
-      className="absolute group cursor-grab active:cursor-grabbing"
+      className="absolute left-0 top-0 group cursor-grab active:cursor-grabbing"
       style={{
-        left: ci.x,
-        top: ci.y,
+        transform: `translate3d(${ci.x}px, ${ci.y}px, 0)`,
         width: ci.width,
         height: ci.height,
         zIndex: ci.zIndex,
         touchAction: "none",
+        willChange: "transform",
       }}
     >
       <img
@@ -561,6 +578,7 @@ function MatchCanvas({
   removeFromCanvas,
   clearCanvas,
   onRequestSave,
+  draggingItemId,
 }: {
   items: WardrobeItem[];
   canvasItems: CanvasItem[];
@@ -570,13 +588,32 @@ function MatchCanvas({
   removeFromCanvas: (id: string) => void;
   clearCanvas: () => void;
   onRequestSave: () => void;
+  draggingItemId: string | null;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
+  const [previewPos, setPreviewPos] = useState<{ x: number; y: number } | null>(null);
   const itemMap = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const draggingItem = draggingItemId ? itemMap.get(draggingItemId) ?? null : null;
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    setIsDragOver(true);
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPreviewPos({
+      x: clamp(e.clientX - rect.left, 0, CANVAS_WIDTH),
+      y: clamp(e.clientY - rect.top, 0, CANVAS_HEIGHT),
+    });
+  }
+
+  function handleDragLeave() {
+    setIsDragOver(false);
+    setPreviewPos(null);
+  }
 
   function handleDrop(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
     setIsDragOver(false);
+    setPreviewPos(null);
     const itemId = e.dataTransfer.getData("text/plain");
     if (itemId) addToCanvas(itemId);
   }
@@ -610,11 +647,8 @@ function MatchCanvas({
 
       <div className="flex-1 overflow-auto p-6 flex items-center justify-center">
         <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            setIsDragOver(true);
-          }}
-          onDragLeave={() => setIsDragOver(false)}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
           onDrop={handleDrop}
           className={`relative bg-white rounded-2xl border transition duration-200 ${
             isDragOver ? "border-neutral-900 border-2" : "border-neutral-200 border-dashed"
@@ -640,6 +674,20 @@ function MatchCanvas({
               />
             );
           })}
+          {isDragOver && draggingItem && previewPos && (
+            <img
+              src={draggingItem.imageUrl}
+              alt=""
+              className="absolute object-contain pointer-events-none select-none opacity-40"
+              style={{
+                left: previewPos.x - 100,
+                top: previewPos.y - 100,
+                width: 200,
+                height: 200,
+                zIndex: 9999,
+              }}
+            />
+          )}
         </div>
       </div>
     </section>
@@ -655,15 +703,49 @@ function WardrobePanel({
   onOpenUpload,
   activeTab,
   setActiveTab,
+  onItemDragStart,
+  onItemDragEnd,
 }: {
   items: WardrobeItem[];
   addToCanvas: (itemId: string) => void;
   removeItem: (item: WardrobeItem) => void;
-  onOpenUpload: () => void;
+  onOpenUpload: (file?: File) => void;
   activeTab: Category | "All";
   setActiveTab: (c: Category | "All") => void;
+  onItemDragStart: (itemId: string) => void;
+  onItemDragEnd: () => void;
 }) {
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
+
+  function handleFileDragOver(e: React.DragEvent<HTMLElement>) {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setIsFileDragOver(true);
+  }
+
+  function handleFileDragLeave(e: React.DragEvent<HTMLElement>) {
+    if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+    setIsFileDragOver(false);
+  }
+
+  function handleFileDrop(e: React.DragEvent<HTMLElement>) {
+    if (!e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    setIsFileDragOver(false);
+    const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith("image/"));
+    if (file) onOpenUpload(file);
+  }
+
+  const [visibleCount, setVisibleCount] = useState(SIDEBAR_PAGE_SIZE);
+  const [prevTab, setPrevTab] = useState(activeTab);
+
+  // Reset pagination whenever the tab changes (adjusting state during
+  // render, per https://react.dev/learn/you-might-not-need-an-effect).
+  if (activeTab !== prevTab) {
+    setPrevTab(activeTab);
+    setVisibleCount(SIDEBAR_PAGE_SIZE);
+  }
 
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -671,14 +753,24 @@ function WardrobePanel({
     return c;
   }, [items]);
 
-  const filtered = useMemo(
-    () => (activeTab === "All" ? items : items.filter((i) => i.category === activeTab)),
-    [items, activeTab]
-  );
+  const filtered = useMemo(() => {
+    const scoped = activeTab === "All" ? items : items.filter((i) => i.category === activeTab);
+    return [...scoped].sort((a, b) => b.lastUsedAt - a.lastUsedAt);
+  }, [items, activeTab]);
+
+  const visibleItems = filtered.slice(0, visibleCount);
+
+  function handleGridScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
+      setVisibleCount((c) => Math.min(c + SIDEBAR_PAGE_SIZE, filtered.length));
+    }
+  }
 
   const tabs: (Category | "All")[] = ["All", ...CATEGORIES];
 
   async function handleRemove(item: WardrobeItem) {
+    if (!confirm("Are you sure you want to delete this item? It will be permanently removed.")) return;
     setRemovingId(item.id);
     try {
       await removeItem(item);
@@ -691,12 +783,22 @@ function WardrobePanel({
   }
 
   return (
-    <aside className="w-full lg:w-[380px] shrink-0 border-l border-neutral-100 flex flex-col h-full bg-white">
+    <aside
+      onDragOver={handleFileDragOver}
+      onDragLeave={handleFileDragLeave}
+      onDrop={handleFileDrop}
+      className="relative w-full lg:w-[380px] shrink-0 border-l border-neutral-100 flex flex-col h-full bg-white"
+    >
+      {isFileDragOver && (
+        <div className="absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-neutral-900 bg-white/90 pointer-events-none">
+          <span className="text-sm text-neutral-500">Drop photo to add item</span>
+        </div>
+      )}
       <div className="p-5 border-b border-neutral-100 space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="text-sm font-medium text-neutral-900">Wardrobe</h2>
           <button
-            onClick={onOpenUpload}
+            onClick={() => onOpenUpload()}
             className="flex items-center gap-1 text-xs bg-neutral-900 text-white rounded-full pl-2 pr-3 py-1.5 hover:bg-neutral-800 transition duration-150"
           >
             <span className="text-sm leading-none">+</span> Add item
@@ -724,7 +826,7 @@ function WardrobePanel({
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-5">
+      <div className="flex-1 overflow-y-auto p-5" onScroll={handleGridScroll}>
         {filtered.length === 0 ? (
           <div className="h-full flex items-center justify-center text-center text-sm text-neutral-400 px-6">
             {items.length === 0
@@ -733,14 +835,16 @@ function WardrobePanel({
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            {filtered.map((item) => (
+            {visibleItems.map((item) => (
               <div
                 key={item.id}
                 draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData("text/plain", item.id);
                   e.dataTransfer.effectAllowed = "copy";
+                  onItemDragStart(item.id);
                 }}
+                onDragEnd={onItemDragEnd}
                 onClick={() => addToCanvas(item.id)}
                 className="group relative rounded-xl border border-neutral-100 bg-neutral-50 aspect-square flex items-center justify-center cursor-grab active:cursor-grabbing hover:shadow-md hover:border-neutral-200 transition duration-200"
                 title="Click or drag onto the canvas"
@@ -778,9 +882,11 @@ function WardrobePanel({
 function UploadModal({
   onClose,
   onAdd,
+  initialFile,
 }: {
   onClose: () => void;
   onAdd: (data: { name: string; category: Category; blob: Blob }) => Promise<unknown>;
+  initialFile?: File | null;
 }) {
   const [stage, setStage] = useState<"select" | "review">("select");
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
@@ -795,6 +901,13 @@ function UploadModal({
       if (previewUrl) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
+
+  // A file dropped onto the wardrobe sidebar arrives already selected —
+  // skip straight to the review stage instead of showing the file picker.
+  useEffect(() => {
+    if (initialFile) handleFile(initialFile);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function handleFile(file: File) {
     setError(null);
@@ -1263,9 +1376,24 @@ export default function WardrobePage() {
   const [view, setView] = useState<"matcher" | "trips">("matcher");
   const [selectedTripId, setSelectedTripId] = useState<string | null>(null);
   const [showUpload, setShowUpload] = useState(false);
+  const [initialUploadFile, setInitialUploadFile] = useState<File | null>(null);
   const [showSave, setShowSave] = useState(false);
   const [categoryTab, setCategoryTab] = useState<Category | "All">("All");
   const [signingOut, setSigningOut] = useState(false);
+  const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+
+  // Warn before closing the tab/browser if there's an in-progress canvas
+  // arrangement that hasn't been saved as a look yet. Browsers ignore any
+  // custom message text and show their own generic confirmation instead.
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (store.canvasItems.length === 0) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [store.canvasItems.length]);
 
   async function handleLogout() {
     if (signingOut) return;
@@ -1336,14 +1464,20 @@ export default function WardrobePage() {
               removeFromCanvas={store.removeFromCanvas}
               clearCanvas={store.clearCanvas}
               onRequestSave={() => setShowSave(true)}
+              draggingItemId={draggingItemId}
             />
             <WardrobePanel
               items={store.items}
               addToCanvas={store.addToCanvas}
               removeItem={store.removeItem}
-              onOpenUpload={() => setShowUpload(true)}
+              onOpenUpload={(file) => {
+                setInitialUploadFile(file ?? null);
+                setShowUpload(true);
+              }}
               activeTab={categoryTab}
               setActiveTab={setCategoryTab}
+              onItemDragStart={setDraggingItemId}
+              onItemDragEnd={() => setDraggingItemId(null)}
             />
           </div>
         ) : selectedTrip ? (
@@ -1370,7 +1504,16 @@ export default function WardrobePage() {
         )}
       </main>
 
-      {showUpload && <UploadModal onClose={() => setShowUpload(false)} onAdd={store.addItem} />}
+      {showUpload && (
+        <UploadModal
+          initialFile={initialUploadFile}
+          onClose={() => {
+            setShowUpload(false);
+            setInitialUploadFile(null);
+          }}
+          onAdd={store.addItem}
+        />
+      )}
       {showSave && (
         <SaveLookModal
           trips={store.trips}
