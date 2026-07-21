@@ -177,6 +177,7 @@ function MatchCanvas({
   removeFromCanvas,
   clearCanvas,
   onRequestSave,
+  onOpenSidebar,
   draggingItemId,
 }: {
   items: WardrobeItem[];
@@ -187,6 +188,7 @@ function MatchCanvas({
   removeFromCanvas: (id: string) => void;
   clearCanvas: () => void;
   onRequestSave: () => void;
+  onOpenSidebar: () => void;
   draggingItemId: string | null;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -229,6 +231,12 @@ function MatchCanvas({
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={onOpenSidebar}
+            className="lg:hidden flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-900 px-3 py-1.5 rounded-full border border-neutral-200 transition duration-150"
+          >
+            Wardrobe
+          </button>
+          <button
             onClick={() => {
               clearCanvas();
               setSelectedId(null);
@@ -248,7 +256,7 @@ function MatchCanvas({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6 flex items-center justify-center">
+      <div className="flex-1 overflow-auto p-6">
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -256,10 +264,10 @@ function MatchCanvas({
           onPointerDown={(e) => {
             if (e.target === e.currentTarget) setSelectedId(null);
           }}
-          className={`relative bg-white rounded-2xl border transition duration-200 ${
+          className={`relative bg-white rounded-2xl border transition duration-200 mx-auto ${
             isDragOver ? "border-neutral-900 border-2" : "border-neutral-200 border-dashed"
           }`}
-          style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT, maxWidth: "100%" }}
+          style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
         >
           {canvasItems.length === 0 && (
             <div className="absolute inset-0 flex items-center justify-center text-sm text-neutral-300 pointer-events-none">
@@ -314,6 +322,8 @@ function WardrobePanel({
   setActiveTab,
   onItemDragStart,
   onItemDragEnd,
+  open,
+  onClose,
 }: {
   items: WardrobeItem[];
   addToCanvas: (itemId: string) => void;
@@ -324,6 +334,8 @@ function WardrobePanel({
   setActiveTab: (c: Category | "All") => void;
   onItemDragStart: (itemId: string) => void;
   onItemDragEnd: () => void;
+  open: boolean;
+  onClose: () => void;
 }) {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
@@ -416,27 +428,44 @@ function WardrobePanel({
   }
 
   return (
-    <aside
-      onDragOver={handleFileDragOver}
-      onDragLeave={handleFileDragLeave}
-      onDrop={handleFileDrop}
-      className="relative w-full lg:w-[380px] shrink-0 border-l border-neutral-100 flex flex-col h-full bg-white"
-    >
-      {isFileDragOver && (
-        <div className="absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-neutral-900 bg-white/90 pointer-events-none">
-          <span className="text-sm text-neutral-500">Drop photo to add item</span>
-        </div>
+    <>
+      {open && (
+        <div
+          onClick={onClose}
+          className="fixed inset-0 z-30 bg-black/30 lg:hidden"
+        />
       )}
-      <div className="p-5 border-b border-neutral-100 space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium text-neutral-900">Wardrobe</h2>
-          <button
-            onClick={() => onOpenUpload()}
-            className="flex items-center gap-1 text-xs bg-neutral-900 text-white rounded-full pl-2 pr-3 py-1.5 hover:bg-neutral-800 transition duration-150"
-          >
-            <span className="text-sm leading-none">+</span> Add item
-          </button>
-        </div>
+      <aside
+        onDragOver={handleFileDragOver}
+        onDragLeave={handleFileDragLeave}
+        onDrop={handleFileDrop}
+        className={`fixed inset-y-0 right-0 z-40 w-full max-w-[min(300px,80vw)] transform transition-transform duration-300 ease-in-out shadow-xl ${
+          open ? "translate-x-0" : "translate-x-full"
+        } lg:static lg:z-auto lg:shadow-none lg:translate-x-0 lg:w-[380px] lg:max-w-none lg:shrink-0 border-l border-neutral-100 flex flex-col h-full bg-white`}
+      >
+        {isFileDragOver && (
+          <div className="absolute inset-2 z-10 flex items-center justify-center rounded-xl border-2 border-dashed border-neutral-900 bg-white/90 pointer-events-none">
+            <span className="text-sm text-neutral-500">Drop photo to add item</span>
+          </div>
+        )}
+        <div className="p-5 border-b border-neutral-100 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-medium text-neutral-900">Wardrobe</h2>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => onOpenUpload()}
+                className="flex items-center gap-1 text-xs bg-neutral-900 text-white rounded-full pl-2 pr-3 py-1.5 hover:bg-neutral-800 transition duration-150"
+              >
+                <span className="text-sm leading-none">+</span> Add item
+              </button>
+              <button
+                onClick={onClose}
+                className="lg:hidden w-7 h-7 flex items-center justify-center rounded-full text-neutral-400 hover:text-neutral-900 hover:bg-neutral-100 transition duration-150"
+              >
+                ×
+              </button>
+            </div>
+          </div>
         <div className="flex flex-wrap gap-1.5">
           {tabs.map((tab) => {
             const isActive = tab === activeTab;
@@ -540,6 +569,7 @@ function WardrobePanel({
         )}
       </div>
     </aside>
+    </>
   );
 }
 
@@ -834,6 +864,7 @@ export default function WardrobePage({
   const [showSave, setShowSave] = useState(false);
   const [categoryTab, setCategoryTab] = useState<Category | "All">("All");
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const loadedEditLookRef = useRef<string | null>(null);
 
   // Coming from "Edit" on a trip's look (/app/wardrobe?editLook=<id>): load
@@ -890,9 +921,12 @@ export default function WardrobePage({
         removeFromCanvas={store.removeFromCanvas}
         clearCanvas={store.clearCanvas}
         onRequestSave={() => setShowSave(true)}
+        onOpenSidebar={() => setSidebarOpen(true)}
         draggingItemId={draggingItemId}
       />
       <WardrobePanel
+        open={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
         items={store.items}
         addToCanvas={store.addToCanvas}
         removeItem={store.removeItem}
