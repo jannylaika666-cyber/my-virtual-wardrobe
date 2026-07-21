@@ -24,3 +24,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Custom scrollbar: thin square black bar (WebKit browsers — Chrome,
+   Safari, Edge). Firefox has no way to set an exact pixel width or square
+   corners via standard CSS, so it falls back to `scrollbar-width: thin`. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #000000 transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 3px;
+  height: 3px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+  border-radius: 0 !important;
+}
+
+*::-webkit-scrollbar-thumb {
+  background-color: #000000;
+  border-radius: 0;
+}
