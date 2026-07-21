@@ -38,6 +38,7 @@ const CATEGORIES = [
   "Top",
   "Bottom",
   "Accessory",
+  "Bag",
   "Footwear",
   "Outer",
   "Swimwear",
