@@ -566,7 +566,8 @@ function CanvasItemView({
           onRemove(ci.id);
         }}
         onPointerDown={(e) => e.stopPropagation()}
-        className="absolute -top-2 -right-2 w-5 h-5 flex items-center justify-center bg-white border border-neutral-200 rounded-full text-neutral-400 opacity-0 group-hover:opacity-100 hover:text-red-500 shadow-sm transition duration-150 text-xs leading-none"
+        className="absolute -top-2 -right-2 w-5 h-5 flex items-center justify-center bg-white border border-neutral-200 rounded-full text-neutral-400 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 hover:text-red-500 shadow-sm transition duration-150 text-xs leading-none"
+        title="Remove from canvas"
       >
         ×
       </button>
@@ -899,7 +900,7 @@ function WardrobePanel({
                     startRename(item);
                   }}
                   disabled={renamingId === item.id}
-                  className="absolute top-1.5 right-7 w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-white/90 rounded-full text-neutral-400 hover:text-neutral-900 disabled:opacity-50 transition duration-150 text-xs leading-none"
+                  className="absolute top-1.5 right-7 w-5 h-5 flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 bg-white/90 rounded-full text-neutral-400 hover:text-neutral-900 disabled:opacity-50 transition duration-150 text-xs leading-none"
                   title="Rename"
                 >
                   ✎
@@ -910,7 +911,8 @@ function WardrobePanel({
                     handleRemove(item);
                   }}
                   disabled={removingId === item.id}
-                  className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-white/90 rounded-full text-neutral-400 hover:text-red-500 disabled:opacity-50 transition duration-150 text-xs leading-none"
+                  className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 bg-white/90 rounded-full text-neutral-400 hover:text-red-500 disabled:opacity-50 transition duration-150 text-xs leading-none"
+                  title="Delete"
                 >
                   ×
                 </button>

@@ -4,6 +4,10 @@ import { createServerClient } from "@supabase/ssr";
 const AUTH_PATHS = ["/auth/signin", "/auth/register"];
 // Anything under /app is the authenticated part of the product.
 const PROTECTED_PREFIX = "/app";
+// Only these roles (set on public.profiles.role) may use /app.
+// USER_NEW (the default for freshly created accounts) is deliberately
+// excluded — new signups stay locked out until manually upgraded.
+const ALLOWED_ROLES = ["USER_PLAN_LITE", "USER_PLAN_PRO", "ADMIN"];
 
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -55,6 +59,23 @@ export async function proxy(request: NextRequest) {
     const url = new URL("/auth/signin", request.url);
     url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
+  }
+
+  // Plan-gate: /app requires a profiles.role of USER_PLAN_LITE or
+  // USER_PLAN_PRO. Fail closed — if the role can't be loaded, deny access
+  // rather than letting an unverified user through.
+  if (isProtected && user) {
+    let role: string | null = null;
+    try {
+      const { data: profile } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+      role = profile?.role ?? null;
+    } catch (err) {
+      console.error("Failed to load user role in proxy:", err);
+    }
+
+    if (!role || !ALLOWED_ROLES.includes(role)) {
+      return new NextResponse("403 Access Denied", { status: 403 });
+    }
   }
 
   if (isAuthPage && user) {
