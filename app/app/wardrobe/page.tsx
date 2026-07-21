@@ -2,6 +2,7 @@
 
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Image from "next/image";
 import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
@@ -58,6 +59,7 @@ function CanvasItemView({
   function handleDragPointerDown(e: React.PointerEvent<HTMLDivElement>) {
     e.stopPropagation();
     e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
     onSelect(ci.id);
     onBringToFront(ci.id);
     const startX = e.clientX;
@@ -87,6 +89,7 @@ function CanvasItemView({
   function handleResizePointerDown(e: React.PointerEvent<HTMLDivElement>, corner: ResizeCorner) {
     e.stopPropagation();
     e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
     onSelect(ci.id);
     onBringToFront(ci.id);
     const startX = e.clientX;
@@ -137,11 +140,13 @@ function CanvasItemView({
         willChange: "transform",
       }}
     >
-      <img
+      <Image
         src={item.imageUrl}
         alt={item.name}
         draggable={false}
-        className="w-full h-full object-contain select-none pointer-events-none drop-shadow-sm"
+        fill
+        sizes="500px"
+        className="object-contain select-none pointer-events-none drop-shadow-sm"
       />
       <button
         onClick={(e) => {
@@ -159,6 +164,7 @@ function CanvasItemView({
           <div
             key={corner}
             onPointerDown={(e) => handleResizePointerDown(e, corner)}
+            style={{ touchAction: "none" }}
             className={`absolute w-3.5 h-3.5 bg-white border-2 border-neutral-900 rounded-full ${RESIZE_CORNER_STYLE[corner]}`}
           />
         ))}
@@ -291,10 +297,8 @@ function MatchCanvas({
             );
           })}
           {isDragOver && draggingItem && previewPos && (
-            <img
-              src={draggingItem.imageUrl}
-              alt=""
-              className="absolute object-contain pointer-events-none select-none opacity-40"
+            <div
+              className="absolute pointer-events-none"
               style={{
                 left: previewPos.x - 100,
                 top: previewPos.y - 100,
@@ -302,7 +306,15 @@ function MatchCanvas({
                 height: 200,
                 zIndex: 9999,
               }}
-            />
+            >
+              <Image
+                src={draggingItem.imageUrl}
+                alt=""
+                fill
+                sizes="200px"
+                className="object-contain select-none opacity-40"
+              />
+            </div>
           )}
         </div>
       </div>
@@ -513,12 +525,16 @@ function WardrobePanel({
                 className="group relative rounded-xl border border-neutral-100 bg-neutral-50 aspect-square flex items-center justify-center cursor-grab active:cursor-grabbing hover:shadow-md hover:border-neutral-200 transition duration-200"
                 title="Click or drag onto the canvas"
               >
-                <img
-                  src={item.imageUrl}
-                  alt={item.name}
-                  className="max-h-[80%] max-w-[80%] object-contain pointer-events-none select-none"
-                  draggable={false}
-                />
+                <div className="relative w-[80%] h-[80%]">
+                  <Image
+                    src={item.imageUrl}
+                    alt={item.name}
+                    fill
+                    sizes="150px"
+                    className="object-contain pointer-events-none select-none"
+                    draggable={false}
+                  />
+                </div>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -679,8 +695,10 @@ function UploadModal({
 
         {stage === "review" && previewUrl && (
           <div className="space-y-4">
-            <div className="h-48 rounded-xl border border-neutral-100 flex items-center justify-center bg-neutral-50">
-              <img src={previewUrl} alt="preview" className="max-h-44 max-w-full object-contain" />
+            <div className="relative h-48 rounded-xl border border-neutral-100 bg-neutral-50">
+              {/* unoptimized: this is an ephemeral client-side blob: URL for
+                  the not-yet-uploaded file — Next's optimizer can't fetch it. */}
+              <Image src={previewUrl} alt="preview" fill unoptimized className="object-contain" />
             </div>
 
             <div>

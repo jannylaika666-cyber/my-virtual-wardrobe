@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import Image from "next/image";
 import type { RealtimePostgresChangesPayload } from "@supabase/supabase-js";
 import { createClient, WARDROBE_BUCKET } from "@/lib/supabase/client";
 
@@ -472,11 +473,9 @@ export function LookPreviewBlock({
           const item = itemMap.get(c.itemId);
           if (!item) return null;
           return (
-            <img
+            <div
               key={c.id}
-              src={item.imageUrl}
-              alt={item.name}
-              className="absolute object-contain pointer-events-none select-none"
+              className="absolute"
               style={{
                 left: `${(c.x / CANVAS_WIDTH) * 100}%`,
                 top: `${(c.y / CANVAS_HEIGHT) * 100}%`,
@@ -484,7 +483,15 @@ export function LookPreviewBlock({
                 height: `${(c.height / CANVAS_HEIGHT) * 100}%`,
                 zIndex: c.zIndex,
               }}
-            />
+            >
+              <Image
+                src={item.imageUrl}
+                alt={item.name}
+                fill
+                sizes="200px"
+                className="object-contain pointer-events-none select-none"
+              />
+            </div>
           );
         })}
     </div>
