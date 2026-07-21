@@ -481,21 +481,37 @@ function LookPreviewBlock({
 
 /* --------------------------- Canvas item (drag/resize) -------------------- */
 
+const RESIZE_CORNERS = ["nw", "ne", "sw", "se"] as const;
+type ResizeCorner = (typeof RESIZE_CORNERS)[number];
+
+const RESIZE_CORNER_STYLE: Record<ResizeCorner, string> = {
+  nw: "-top-1.5 -left-1.5 cursor-nwse-resize",
+  ne: "-top-1.5 -right-1.5 cursor-nesw-resize",
+  sw: "-bottom-1.5 -left-1.5 cursor-nesw-resize",
+  se: "-bottom-1.5 -right-1.5 cursor-nwse-resize",
+};
+
 function CanvasItemView({
   ci,
   item,
+  selected,
+  onSelect,
   onUpdate,
   onBringToFront,
   onRemove,
 }: {
   ci: CanvasItem;
   item: WardrobeItem;
+  selected: boolean;
+  onSelect: (id: string) => void;
   onUpdate: (id: string, patch: Partial<CanvasItem>) => void;
   onBringToFront: (id: string) => void;
   onRemove: (id: string) => void;
 }) {
   function handleDragPointerDown(e: React.PointerEvent<HTMLDivElement>) {
+    e.stopPropagation();
     e.preventDefault();
+    onSelect(ci.id);
     onBringToFront(ci.id);
     const startX = e.clientX;
     const startY = e.clientY;
@@ -518,20 +534,38 @@ function CanvasItemView({
     window.addEventListener("pointerup", onUp);
   }
 
-  function handleResizePointerDown(e: React.PointerEvent<HTMLDivElement>) {
+  // Resizing keeps the aspect ratio and anchors the opposite corner in
+  // place — dragging the nw handle grows the box up-left while the se
+  // corner stays put, and so on.
+  function handleResizePointerDown(e: React.PointerEvent<HTMLDivElement>, corner: ResizeCorner) {
     e.stopPropagation();
     e.preventDefault();
+    onSelect(ci.id);
     onBringToFront(ci.id);
     const startX = e.clientX;
     const startW = ci.width;
     const startH = ci.height;
+    const startCX = ci.x;
+    const startCY = ci.y;
     const aspect = startW / startH;
+    const growsLeft = corner === "nw" || corner === "sw";
+    const growsUp = corner === "nw" || corner === "ne";
 
     function onMove(ev: PointerEvent) {
       const dx = ev.clientX - startX;
-      const newWidth = clamp(startW + dx, 60, 500);
+      const newWidth = clamp(startW + (growsLeft ? -dx : dx), 60, 500);
       const newHeight = newWidth / aspect;
-      onUpdate(ci.id, { width: newWidth, height: newHeight });
+      const deltaW = newWidth - startW;
+      const deltaH = newHeight - startH;
+      const newX = growsLeft ? startCX - deltaW : startCX;
+      const newY = growsUp ? startCY - deltaH : startCY;
+
+      onUpdate(ci.id, {
+        width: newWidth,
+        height: newHeight,
+        x: clamp(newX, 0, CANVAS_WIDTH - newWidth),
+        y: clamp(newY, 0, CANVAS_HEIGHT - newHeight),
+      });
     }
     function onUp() {
       window.removeEventListener("pointermove", onMove);
@@ -544,7 +578,9 @@ function CanvasItemView({
   return (
     <div
       onPointerDown={handleDragPointerDown}
-      className="absolute left-0 top-0 group cursor-grab active:cursor-grabbing"
+      className={`absolute left-0 top-0 group cursor-grab active:cursor-grabbing ${
+        selected ? "ring-2 ring-neutral-900" : ""
+      }`}
       style={{
         transform: `translate3d(${ci.x}px, ${ci.y}px, 0)`,
         width: ci.width,
@@ -571,10 +607,14 @@ function CanvasItemView({
       >
         ×
       </button>
-      <div
-        onPointerDown={handleResizePointerDown}
-        className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-white border border-neutral-300 rounded-sm opacity-0 group-hover:opacity-100 cursor-nwse-resize transition duration-150"
-      />
+      {selected &&
+        RESIZE_CORNERS.map((corner) => (
+          <div
+            key={corner}
+            onPointerDown={(e) => handleResizePointerDown(e, corner)}
+            className={`absolute w-3.5 h-3.5 bg-white border-2 border-neutral-900 rounded-full ${RESIZE_CORNER_STYLE[corner]}`}
+          />
+        ))}
     </div>
   );
 }
@@ -604,6 +644,7 @@ function MatchCanvas({
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [previewPos, setPreviewPos] = useState<{ x: number; y: number } | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const itemMap = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const draggingItem = draggingItemId ? itemMap.get(draggingItemId) ?? null : null;
 
@@ -641,7 +682,10 @@ function MatchCanvas({
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={clearCanvas}
+            onClick={() => {
+              clearCanvas();
+              setSelectedId(null);
+            }}
             disabled={canvasItems.length === 0}
             className="text-xs text-neutral-500 hover:text-neutral-900 disabled:opacity-30 disabled:hover:text-neutral-500 px-3 py-1.5 rounded-full border border-neutral-200 transition duration-150"
           >
@@ -662,6 +706,9 @@ function MatchCanvas({
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) setSelectedId(null);
+          }}
           className={`relative bg-white rounded-2xl border transition duration-200 ${
             isDragOver ? "border-neutral-900 border-2" : "border-neutral-200 border-dashed"
           }`}
@@ -680,6 +727,8 @@ function MatchCanvas({
                 key={ci.id}
                 ci={ci}
                 item={item}
+                selected={ci.id === selectedId}
+                onSelect={setSelectedId}
                 onUpdate={updateCanvasItem}
                 onBringToFront={bringToFront}
                 onRemove={removeFromCanvas}
