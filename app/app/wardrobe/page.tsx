@@ -281,6 +281,15 @@ function useWardrobeStore() {
     [supabase]
   );
 
+  const renameItem = useCallback(
+    async (id: string, name: string) => {
+      const { error: updateError } = await supabase.from("wardrobe_items").update({ name }).eq("id", id);
+      if (updateError) throw updateError;
+      setItems((s) => s.map((i) => (i.id === id ? { ...i, name } : i)));
+    },
+    [supabase]
+  );
+
   const addToCanvas = useCallback(
     (itemId: string) => {
       setCanvasItems((s) => {
@@ -407,6 +416,7 @@ function useWardrobeStore() {
     error,
     addItem,
     removeItem,
+    renameItem,
     addToCanvas,
     updateCanvasItem,
     bringToFront,
@@ -701,6 +711,7 @@ function WardrobePanel({
   items,
   addToCanvas,
   removeItem,
+  renameItem,
   onOpenUpload,
   activeTab,
   setActiveTab,
@@ -710,6 +721,7 @@ function WardrobePanel({
   items: WardrobeItem[];
   addToCanvas: (itemId: string) => void;
   removeItem: (item: WardrobeItem) => void;
+  renameItem: (id: string, name: string) => Promise<unknown>;
   onOpenUpload: (file?: File) => void;
   activeTab: Category | "All";
   setActiveTab: (c: Category | "All") => void;
@@ -718,6 +730,9 @@ function WardrobePanel({
 }) {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState("");
+  const [renamingId, setRenamingId] = useState<string | null>(null);
 
   function handleFileDragOver(e: React.DragEvent<HTMLElement>) {
     if (!e.dataTransfer.types.includes("Files")) return;
@@ -783,6 +798,26 @@ function WardrobePanel({
     }
   }
 
+  function startRename(item: WardrobeItem) {
+    setEditingId(item.id);
+    setEditingName(item.name);
+  }
+
+  async function commitRename(item: WardrobeItem) {
+    const trimmed = editingName.trim();
+    setEditingId(null);
+    if (!trimmed || trimmed === item.name) return;
+    setRenamingId(item.id);
+    try {
+      await renameItem(item.id, trimmed);
+    } catch (err) {
+      console.error(err);
+      alert("Couldn't rename this item. Check your connection and try again.");
+    } finally {
+      setRenamingId(null);
+    }
+  }
+
   return (
     <aside
       onDragOver={handleFileDragOver}
@@ -839,14 +874,16 @@ function WardrobePanel({
             {visibleItems.map((item) => (
               <div
                 key={item.id}
-                draggable
+                draggable={editingId !== item.id}
                 onDragStart={(e) => {
                   e.dataTransfer.setData("text/plain", item.id);
                   e.dataTransfer.effectAllowed = "copy";
                   onItemDragStart(item.id);
                 }}
                 onDragEnd={onItemDragEnd}
-                onClick={() => addToCanvas(item.id)}
+                onClick={() => {
+                  if (editingId !== item.id) addToCanvas(item.id);
+                }}
                 className="group relative rounded-xl border border-neutral-100 bg-neutral-50 aspect-square flex items-center justify-center cursor-grab active:cursor-grabbing hover:shadow-md hover:border-neutral-200 transition duration-200"
                 title="Click or drag onto the canvas"
               >
@@ -859,6 +896,17 @@ function WardrobePanel({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
+                    startRename(item);
+                  }}
+                  disabled={renamingId === item.id}
+                  className="absolute top-1.5 right-7 w-5 h-5 flex items-center justify-center opacity-0 group-hover:opacity-100 bg-white/90 rounded-full text-neutral-400 hover:text-neutral-900 disabled:opacity-50 transition duration-150 text-xs leading-none"
+                  title="Rename"
+                >
+                  ✎
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
                     handleRemove(item);
                   }}
                   disabled={removingId === item.id}
@@ -866,9 +914,28 @@ function WardrobePanel({
                 >
                   ×
                 </button>
-                <span className="absolute bottom-1.5 left-1.5 right-1.5 text-[10px] text-neutral-500 truncate bg-white/80 rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition duration-150">
-                  {item.name}
-                </span>
+                {editingId === item.id ? (
+                  <input
+                    autoFocus
+                    value={editingName}
+                    onChange={(e) => setEditingName(e.target.value)}
+                    onClick={(e) => e.stopPropagation()}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.currentTarget.blur();
+                      } else if (e.key === "Escape") {
+                        setEditingId(null);
+                      }
+                    }}
+                    onBlur={() => commitRename(item)}
+                    className="absolute bottom-1.5 left-1.5 right-1.5 text-[10px] text-neutral-900 bg-white border border-neutral-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-neutral-900"
+                  />
+                ) : (
+                  <span className="absolute bottom-1.5 left-1.5 right-1.5 text-[10px] text-neutral-500 truncate bg-white/80 rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition duration-150">
+                    {item.name}
+                  </span>
+                )}
               </div>
             ))}
           </div>
@@ -1486,6 +1553,7 @@ export default function WardrobePage() {
               items={store.items}
               addToCanvas={store.addToCanvas}
               removeItem={store.removeItem}
+              renameItem={store.renameItem}
               onOpenUpload={(file) => {
                 setInitialUploadFile(file ?? null);
                 setShowUpload(true);
