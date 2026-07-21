@@ -1,36 +1,77 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# My Virtual Wardrobe
 
-## Getting Started
+A personal wardrobe app: catalog your clothes, mix and match outfits on a
+drag-and-drop canvas, and archive favorite looks into trips. Built with
+Next.js (App Router) and Supabase (Auth, Postgres, Storage, Realtime).
 
-First, run the development server:
+## Features
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- **Wardrobe** — add clothing photos (file picker, drag-and-drop, or paste
+  from clipboard), organize by category, rename or delete items
+- **Mix & Match canvas** — drag items onto a canvas, select an item to reveal
+  4-corner resize handles, save the arrangement as a "look"
+- **Trips** — archive looks into named trips; reopening a look for editing
+  loads it back onto the canvas
+- **Auth** — Supabase email/password sign-in, gated by a per-user plan role
+- **Realtime sync** — edits on one device appear on another automatically
+- **PWA** — installable ("Add to Home Screen") with a web manifest and icons
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## URL paths
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Path                          | Description                                       | Auth required |
+| ------------------------------ | -------------------------------------------------- | -------------- |
+| `/`                             | Redirects to `/app/wardrobe`                        | —              |
+| `/auth/signin`                  | Sign in                                             | No             |
+| `/auth/register`                | Create an account                                   | No             |
+| `/auth/callback`                | Supabase email confirmation / magic-link callback   | No             |
+| `/app/wardrobe`                 | Wardrobe sidebar + Mix & Match canvas                | Yes            |
+| `/app/wardrobe?editLook=<id>`   | Loads a saved look onto the canvas for editing       | Yes            |
+| `/app/trip`                     | List of trips                                       | Yes            |
+| `/app/trip/[tripId]`            | Looks archived under one trip                       | Yes            |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Routes under `/app` require a signed-in user whose `profiles.role` is
+`USER_PLAN_LITE`, `USER_PLAN_PRO`, or `ADMIN` (enforced in `proxy.ts`);
+anything else — including the `USER_NEW` default given to new signups —
+gets a plain 403 response.
 
-## Learn More
+## Getting started
 
-To learn more about Next.js, take a look at the following resources:
+1. Add a `.env.local` with your Supabase project's URL and anon/publishable key:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+   ```
+   NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=<anon-or-publishable-key>
+   ```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+2. Apply the database migrations in `supabase/migrations/` — either paste
+   each file into the Supabase SQL Editor in order, or run
+   `supabase db push --linked` if you have the CLI installed and linked to
+   your project.
 
-## Deploy on Vercel
+3. Install dependencies and start the dev server:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+   ```bash
+   npm install
+   npm run dev
+   ```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+   Open [http://localhost:3000](http://localhost:3000).
+
+## Tech stack
+
+- **Next.js 16** (App Router). Note: this version renamed `middleware.ts` to
+  `proxy.ts` — see `proxy.ts` for route protection.
+- **Supabase** — Auth, Postgres with Row Level Security, Storage, Realtime
+- **Tailwind CSS 4**
+- **TypeScript**
+
+## Project structure
+
+- `app/` — routes (see [URL paths](#url-paths) above)
+- `lib/wardrobe.tsx` — shared data layer (Supabase-backed store, provided via
+  React Context from `app/app/layout.tsx` so it survives navigation between
+  `/app/wardrobe` and `/app/trip`) plus the Trips list/detail view components
+- `lib/supabase/` — browser and server Supabase client helpers
+- `proxy.ts` — signed-in check + plan-role gating for everything under `/app`
+- `supabase/migrations/` — SQL migrations: core tables, RLS policies, storage
+  bucket policies, and the `profiles.role` access gate
