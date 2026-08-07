@@ -54,6 +54,7 @@ export const COLORS = [
   "Green",
   "Navy",
   "Blue",
+  "Denim",
   "Pink",
   "Purple",
   "Lilac",
