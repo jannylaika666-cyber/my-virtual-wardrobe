@@ -39,10 +39,42 @@ export const CATEGORIES = [
 
 export type Category = (typeof CATEGORIES)[number];
 
+// The exact set of selectable item colors. "All" is a filter-only reset
+// option, never a real item's color — see COLOR_FILTER_OPTIONS below.
+export const COLORS = [
+  "White",
+  "Black",
+  "Ivory",
+  "Beige",
+  "Brown",
+  "Grey",
+  "Yellow",
+  "Orange",
+  "Red",
+  "Green",
+  "Navy",
+  "Blue",
+  "Pink",
+  "Purple",
+  "Lilac",
+  "Mint",
+  "Turquoise",
+  "Lemon",
+  "Gold",
+  "Silver",
+  "Glitter",
+  "Multi-color",
+] as const;
+
+export type WardrobeColor = (typeof COLORS)[number];
+
+export const COLOR_FILTER_OPTIONS = ["All", ...COLORS] as const;
+
 export interface WardrobeItem {
   id: string;
   name: string;
   category: Category;
+  color: WardrobeColor | null; // null only for items uploaded before this field existed
   imageUrl: string;
   imagePath: string; // storage object path ("<user_id>/<file>.png"), needed to delete the file
   createdAt: number;
@@ -117,6 +149,7 @@ function mapItemRow(row: Row): WardrobeItem {
     id: row.id,
     name: row.name,
     category: row.category as Category,
+    color: (row.color as WardrobeColor | null) ?? null,
     imageUrl: row.image_url,
     imagePath: row.image_path,
     createdAt: new Date(row.created_at).getTime(),
@@ -231,7 +264,7 @@ function useWardrobeStore() {
   }, [supabase]);
 
   const addItem = useCallback(
-    async (data: { name: string; category: Category; blob: Blob }) => {
+    async (data: { name: string; category: Category; color: WardrobeColor; blob: Blob }) => {
       const { data: userData, error: userError } = await supabase.auth.getUser();
       if (userError || !userData.user) {
         throw new Error("You're not signed in. Please sign in again.");
@@ -249,7 +282,13 @@ function useWardrobeStore() {
 
       const { data: row, error: insertError } = await supabase
         .from("wardrobe_items")
-        .insert({ name: data.name, category: data.category, image_url: publicUrl, image_path: path })
+        .insert({
+          name: data.name,
+          category: data.category,
+          color: data.color,
+          image_url: publicUrl,
+          image_path: path,
+        })
         .select()
         .single();
       if (insertError) throw insertError;
@@ -272,11 +311,56 @@ function useWardrobeStore() {
     [supabase]
   );
 
-  const renameItem = useCallback(
-    async (id: string, name: string) => {
-      const { error: updateError } = await supabase.from("wardrobe_items").update({ name }).eq("id", id);
+  const updateItem = useCallback(
+    async (
+      item: WardrobeItem,
+      data: { name: string; category: Category; color: WardrobeColor; newImageBlob?: Blob }
+    ) => {
+      let imageUrl = item.imageUrl;
+      let imagePath = item.imagePath;
+
+      if (data.newImageBlob) {
+        const { data: userData, error: userError } = await supabase.auth.getUser();
+        if (userError || !userData.user) {
+          throw new Error("You're not signed in. Please sign in again.");
+        }
+
+        const newPath = `${userData.user.id}/${makeId()}.png`;
+        const { error: uploadError } = await supabase.storage
+          .from(WARDROBE_BUCKET)
+          .upload(newPath, data.newImageBlob, { contentType: "image/png", upsert: false });
+        if (uploadError) throw uploadError;
+
+        const {
+          data: { publicUrl },
+        } = supabase.storage.from(WARDROBE_BUCKET).getPublicUrl(newPath);
+
+        // Best-effort cleanup of the old photo — don't fail the whole save
+        // over it if it doesn't go through.
+        supabase.storage
+          .from(WARDROBE_BUCKET)
+          .remove([item.imagePath])
+          .then(({ error }) => {
+            if (error) console.error("Couldn't remove replaced item photo:", error);
+          });
+
+        imageUrl = publicUrl;
+        imagePath = newPath;
+      }
+
+      const { error: updateError } = await supabase
+        .from("wardrobe_items")
+        .update({ name: data.name, category: data.category, color: data.color, image_url: imageUrl, image_path: imagePath })
+        .eq("id", item.id);
       if (updateError) throw updateError;
-      setItems((s) => s.map((i) => (i.id === id ? { ...i, name } : i)));
+
+      setItems((s) =>
+        s.map((i) =>
+          i.id === item.id
+            ? { ...i, name: data.name, category: data.category, color: data.color, imageUrl, imagePath }
+            : i
+        )
+      );
     },
     [supabase]
   );
@@ -407,7 +491,7 @@ function useWardrobeStore() {
     error,
     addItem,
     removeItem,
-    renameItem,
+    updateItem,
     addToCanvas,
     updateCanvasItem,
     bringToFront,

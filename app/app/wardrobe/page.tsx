@@ -7,12 +7,15 @@ import {
   CANVAS_WIDTH,
   CANVAS_HEIGHT,
   CATEGORIES,
+  COLOR_FILTER_OPTIONS,
+  COLORS,
   clamp,
   downscaleImage,
   useWardrobeStoreContext,
   type Category,
   type CanvasItem,
   type Trip,
+  type WardrobeColor,
   type WardrobeItem,
 } from "@/lib/wardrobe";
 
@@ -328,8 +331,8 @@ function WardrobePanel({
   items,
   addToCanvas,
   removeItem,
-  renameItem,
   onOpenUpload,
+  onEditItem,
   activeTab,
   setActiveTab,
   onItemDragStart,
@@ -340,8 +343,8 @@ function WardrobePanel({
   items: WardrobeItem[];
   addToCanvas: (itemId: string) => void;
   removeItem: (item: WardrobeItem) => void;
-  renameItem: (id: string, name: string) => Promise<unknown>;
   onOpenUpload: (file?: File) => void;
+  onEditItem: (item: WardrobeItem) => void;
   activeTab: Category | "All";
   setActiveTab: (c: Category | "All") => void;
   onItemDragStart: (itemId: string) => void;
@@ -351,9 +354,32 @@ function WardrobePanel({
 }) {
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [isFileDragOver, setIsFileDragOver] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editingName, setEditingName] = useState("");
-  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [colorFilterOpen, setColorFilterOpen] = useState(false);
+  const [selectedColors, setSelectedColors] = useState<WardrobeColor[]>([]);
+  const colorFilterRef = useRef<HTMLDivElement>(null);
+
+  // Close the color filter dropdown on outside click or Escape.
+  useEffect(() => {
+    if (!colorFilterOpen) return;
+    function handlePointerDown(e: PointerEvent) {
+      if (colorFilterRef.current && !colorFilterRef.current.contains(e.target as Node)) {
+        setColorFilterOpen(false);
+      }
+    }
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") setColorFilterOpen(false);
+    }
+    window.addEventListener("pointerdown", handlePointerDown);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("pointerdown", handlePointerDown);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [colorFilterOpen]);
+
+  function toggleColor(c: WardrobeColor) {
+    setSelectedColors((s) => (s.includes(c) ? s.filter((x) => x !== c) : [...s, c]));
+  }
 
   function handleFileDragOver(e: React.DragEvent<HTMLElement>) {
     if (!e.dataTransfer.types.includes("Files")) return;
@@ -391,9 +417,12 @@ function WardrobePanel({
   }, [items]);
 
   const filtered = useMemo(() => {
-    const scoped = activeTab === "All" ? items : items.filter((i) => i.category === activeTab);
+    let scoped = activeTab === "All" ? items : items.filter((i) => i.category === activeTab);
+    if (selectedColors.length > 0) {
+      scoped = scoped.filter((i) => i.color && selectedColors.includes(i.color));
+    }
     return [...scoped].sort((a, b) => b.lastUsedAt - a.lastUsedAt);
-  }, [items, activeTab]);
+  }, [items, activeTab, selectedColors]);
 
   const visibleItems = filtered.slice(0, visibleCount);
 
@@ -416,26 +445,6 @@ function WardrobePanel({
       alert("Couldn't delete this item. Check your connection and try again.");
     } finally {
       setRemovingId(null);
-    }
-  }
-
-  function startRename(item: WardrobeItem) {
-    setEditingId(item.id);
-    setEditingName(item.name);
-  }
-
-  async function commitRename(item: WardrobeItem) {
-    const trimmed = editingName.trim();
-    setEditingId(null);
-    if (!trimmed || trimmed === item.name) return;
-    setRenamingId(item.id);
-    try {
-      await renameItem(item.id, trimmed);
-    } catch (err) {
-      console.error(err);
-      alert("Couldn't rename this item. Check your connection and try again.");
-    } finally {
-      setRenamingId(null);
     }
   }
 
@@ -464,6 +473,63 @@ function WardrobePanel({
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-medium text-neutral-900">Wardrobe</h2>
             <div className="flex items-center gap-2">
+              <div className="relative" ref={colorFilterRef}>
+                <button
+                  onClick={() => setColorFilterOpen((o) => !o)}
+                  title="Filter by color"
+                  className={`relative flex items-center justify-center w-8 h-8 rounded-full border transition duration-150 ${
+                    selectedColors.length > 0
+                      ? "bg-neutral-900 border-neutral-900 text-white"
+                      : "bg-white border-neutral-200 text-neutral-500 hover:border-neutral-400 hover:text-neutral-900"
+                  }`}
+                >
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path
+                      d="M1.5 2.5H14.5L9.5 8.5V13L6.5 14.5V8.5L1.5 2.5Z"
+                      stroke="currentColor"
+                      strokeWidth="1.3"
+                      strokeLinejoin="round"
+                    />
+                  </svg>
+                  {selectedColors.length > 0 && (
+                    <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-0.5 rounded-full bg-red-500 text-white text-[10px] leading-4 text-center">
+                      {selectedColors.length}
+                    </span>
+                  )}
+                </button>
+
+                {colorFilterOpen && (
+                  <div className="absolute right-0 top-full mt-2 z-20 w-52 max-h-72 overflow-y-auto rounded-xl border border-neutral-200 bg-white shadow-lg p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-medium text-neutral-900">Filter by color</span>
+                      <button
+                        onClick={() => setSelectedColors([])}
+                        className="text-xs text-neutral-400 hover:text-neutral-900 transition duration-150"
+                      >
+                        Clear
+                      </button>
+                    </div>
+                    {COLOR_FILTER_OPTIONS.map((c) => {
+                      const isAll = c === "All";
+                      const checked = isAll ? selectedColors.length === 0 : selectedColors.includes(c as WardrobeColor);
+                      return (
+                        <label
+                          key={c}
+                          className="flex items-center gap-2 text-xs text-neutral-600 py-1 cursor-pointer hover:text-neutral-900"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => (isAll ? setSelectedColors([]) : toggleColor(c as WardrobeColor))}
+                            className="accent-neutral-900"
+                          />
+                          {c}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
               <button
                 onClick={() => onOpenUpload()}
                 className="flex items-center gap-1 text-xs bg-neutral-900 text-white rounded-full pl-2 pr-3 py-1.5 hover:bg-neutral-800 transition duration-150"
@@ -512,16 +578,14 @@ function WardrobePanel({
             {visibleItems.map((item) => (
               <div
                 key={item.id}
-                draggable={editingId !== item.id}
+                draggable
                 onDragStart={(e) => {
                   e.dataTransfer.setData("text/plain", item.id);
                   e.dataTransfer.effectAllowed = "copy";
                   onItemDragStart(item.id);
                 }}
                 onDragEnd={onItemDragEnd}
-                onClick={() => {
-                  if (editingId !== item.id) addToCanvas(item.id);
-                }}
+                onClick={() => addToCanvas(item.id)}
                 className="group relative rounded-xl border border-neutral-100 bg-neutral-50 aspect-square flex items-center justify-center cursor-grab active:cursor-grabbing hover:shadow-md hover:border-neutral-200 transition duration-200"
                 title="Click or drag onto the canvas"
               >
@@ -538,11 +602,10 @@ function WardrobePanel({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    startRename(item);
+                    onEditItem(item);
                   }}
-                  disabled={renamingId === item.id}
-                  className="absolute top-1.5 right-7 w-5 h-5 flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 bg-white/90 rounded-full text-neutral-400 hover:text-neutral-900 disabled:opacity-50 transition duration-150 text-xs leading-none"
-                  title="Rename"
+                  className="absolute top-1.5 right-7 w-5 h-5 flex items-center justify-center opacity-100 sm:opacity-0 sm:group-hover:opacity-100 bg-white/90 rounded-full text-neutral-400 hover:text-neutral-900 transition duration-150 text-xs leading-none"
+                  title="Edit"
                 >
                   ✎
                 </button>
@@ -557,28 +620,9 @@ function WardrobePanel({
                 >
                   ×
                 </button>
-                {editingId === item.id ? (
-                  <input
-                    autoFocus
-                    value={editingName}
-                    onChange={(e) => setEditingName(e.target.value)}
-                    onClick={(e) => e.stopPropagation()}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.currentTarget.blur();
-                      } else if (e.key === "Escape") {
-                        setEditingId(null);
-                      }
-                    }}
-                    onBlur={() => commitRename(item)}
-                    className="absolute bottom-1.5 left-1.5 right-1.5 text-[10px] text-neutral-900 bg-white border border-neutral-300 rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-neutral-900"
-                  />
-                ) : (
-                  <span className="absolute bottom-1.5 left-1.5 right-1.5 text-[10px] text-neutral-500 truncate bg-white/80 rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition duration-150">
-                    {item.name}
-                  </span>
-                )}
+                <span className="absolute bottom-1.5 left-1.5 right-1.5 text-[10px] text-neutral-500 truncate bg-white/80 rounded px-1.5 py-0.5 opacity-0 group-hover:opacity-100 transition duration-150">
+                  {item.name}
+                </span>
               </div>
             ))}
           </div>
@@ -594,23 +638,36 @@ function WardrobePanel({
 function UploadModal({
   onClose,
   onAdd,
+  onUpdate,
   initialFile,
+  editingItem,
 }: {
   onClose: () => void;
-  onAdd: (data: { name: string; category: Category; blob: Blob }) => Promise<unknown>;
+  onAdd: (data: { name: string; category: Category; color: WardrobeColor; blob: Blob }) => Promise<unknown>;
+  onUpdate: (
+    item: WardrobeItem,
+    data: { name: string; category: Category; color: WardrobeColor; newImageBlob?: Blob }
+  ) => Promise<unknown>;
   initialFile?: File | null;
+  editingItem?: WardrobeItem | null;
 }) {
-  const [stage, setStage] = useState<"select" | "review">("select");
+  // Editing starts straight at "review" with the item's existing details
+  // pre-filled; creating starts at "select" with an empty form.
+  const [stage, setStage] = useState<"select" | "review">(editingItem ? "review" : "select");
   const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState<Category>("Top");
+  const [previewUrl, setPreviewUrl] = useState<string | null>(editingItem?.imageUrl ?? null);
+  const [name, setName] = useState(editingItem?.name ?? "");
+  const [category, setCategory] = useState<Category>(editingItem?.category ?? "Top");
+  const [color, setColor] = useState<WardrobeColor>(editingItem?.color ?? COLORS[0]);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     return () => {
-      if (previewUrl) URL.revokeObjectURL(previewUrl);
+      // Only ever revoke blob: URLs we created ourselves — editingItem's
+      // initial previewUrl is a real remote Supabase URL, not a blob.
+      if (previewUrl?.startsWith("blob:")) URL.revokeObjectURL(previewUrl);
     };
   }, [previewUrl]);
 
@@ -621,7 +678,8 @@ function UploadModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Let Ctrl/Cmd+V paste a copied image straight into the modal.
+  // Let Ctrl/Cmd+V paste a copied image straight into the modal (also
+  // works in edit mode, replacing the current photo).
   useEffect(() => {
     function handlePaste(e: ClipboardEvent) {
       const item = Array.from(e.clipboardData?.items ?? []).find((i) => i.type.startsWith("image/"));
@@ -633,6 +691,7 @@ function UploadModal({
     }
     window.addEventListener("paste", handlePaste);
     return () => window.removeEventListener("paste", handlePaste);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   async function handleFile(file: File) {
@@ -641,21 +700,30 @@ function UploadModal({
       const blob = await downscaleImage(file);
       setPreviewBlob(blob);
       setPreviewUrl(URL.createObjectURL(blob));
-      setName(file.name.replace(/\.[^/.]+$/, ""));
+      if (!editingItem) setName(file.name.replace(/\.[^/.]+$/, ""));
       setStage("review");
     } catch (err) {
       console.error(err);
       setError("Couldn't read that image. Try another file.");
-      setStage("select");
+      if (!editingItem) setStage("select");
     }
   }
 
   async function handleSave() {
-    if (!previewBlob) return;
+    if (!editingItem && !previewBlob) return;
     setSaving(true);
     setError(null);
     try {
-      await onAdd({ name: name.trim() || "New item", category, blob: previewBlob });
+      if (editingItem) {
+        await onUpdate(editingItem, {
+          name: name.trim() || "New item",
+          category,
+          color,
+          newImageBlob: previewBlob ?? undefined,
+        });
+      } else {
+        await onAdd({ name: name.trim() || "New item", category, color, blob: previewBlob! });
+      }
       onClose();
     } catch (err) {
       console.error(err);
@@ -668,7 +736,9 @@ function UploadModal({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm px-4">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-xl border border-neutral-100 p-6">
         <div className="flex items-center justify-between mb-5">
-          <h2 className="text-sm font-medium text-neutral-900">Add clothing item</h2>
+          <h2 className="text-sm font-medium text-neutral-900">
+            {editingItem ? "Edit clothing item" : "Add clothing item"}
+          </h2>
           <button onClick={onClose} className="text-neutral-400 hover:text-neutral-900 transition duration-150 text-lg leading-none">
             ×
           </button>
@@ -696,9 +766,29 @@ function UploadModal({
         {stage === "review" && previewUrl && (
           <div className="space-y-4">
             <div className="relative h-48 rounded-xl border border-neutral-100 bg-neutral-50">
-              {/* unoptimized: this is an ephemeral client-side blob: URL for
-                  the not-yet-uploaded file — Next's optimizer can't fetch it. */}
+              {/* unoptimized: previewUrl is either an ephemeral client-side
+                  blob: URL for a not-yet-uploaded file, or (in edit mode,
+                  until a new photo is picked) the item's real remote URL —
+                  either way Next's optimizer doesn't need to touch it here. */}
               <Image src={previewUrl} alt="preview" fill unoptimized className="object-contain" />
+              {editingItem && (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute bottom-2 right-2 text-xs bg-white/90 text-neutral-700 px-2.5 py-1 rounded-full border border-neutral-200 hover:bg-white hover:text-neutral-900 transition duration-150"
+                >
+                  Change photo
+                </button>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFile(file);
+                }}
+              />
             </div>
 
             <div>
@@ -730,12 +820,27 @@ function UploadModal({
               </div>
             </div>
 
+            <div>
+              <label className="text-xs text-neutral-500 mb-1 block">Color</label>
+              <select
+                value={color}
+                onChange={(e) => setColor(e.target.value as WardrobeColor)}
+                className="w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-neutral-900"
+              >
+                {COLORS.map((c) => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
             <button
               onClick={handleSave}
               disabled={saving}
               className="w-full rounded-lg bg-neutral-900 text-white text-sm py-2.5 hover:bg-neutral-800 disabled:opacity-50 transition duration-150"
             >
-              {saving ? "Adding…" : "Add to wardrobe"}
+              {saving ? (editingItem ? "Saving…" : "Adding…") : editingItem ? "Save changes" : "Add to wardrobe"}
             </button>
           </div>
         )}
@@ -879,6 +984,7 @@ export default function WardrobePage({
   const router = useRouter();
   const [showUpload, setShowUpload] = useState(false);
   const [initialUploadFile, setInitialUploadFile] = useState<File | null>(null);
+  const [editingItem, setEditingItem] = useState<WardrobeItem | null>(null);
   const [showSave, setShowSave] = useState(false);
   const [categoryTab, setCategoryTab] = useState<Category | "All">("All");
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
@@ -948,9 +1054,12 @@ export default function WardrobePage({
         items={store.items}
         addToCanvas={store.addToCanvas}
         removeItem={store.removeItem}
-        renameItem={store.renameItem}
         onOpenUpload={(file) => {
           setInitialUploadFile(file ?? null);
+          setShowUpload(true);
+        }}
+        onEditItem={(item) => {
+          setEditingItem(item);
           setShowUpload(true);
         }}
         activeTab={categoryTab}
@@ -962,11 +1071,14 @@ export default function WardrobePage({
       {showUpload && (
         <UploadModal
           initialFile={initialUploadFile}
+          editingItem={editingItem}
           onClose={() => {
             setShowUpload(false);
             setInitialUploadFile(null);
+            setEditingItem(null);
           }}
           onAdd={store.addItem}
+          onUpdate={store.updateItem}
         />
       )}
       {showSave && (
