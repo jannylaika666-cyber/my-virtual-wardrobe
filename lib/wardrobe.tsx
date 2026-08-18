@@ -617,39 +617,22 @@ function TripCard({
   return (
     <div
       onClick={onOpen}
-      className="group relative cursor-pointer rounded-2xl border border-neutral-100 hover:border-neutral-200 hover:shadow-md p-4 transition duration-200"
+      className="group cursor-pointer rounded-2xl border border-neutral-100 sm:hover:border-neutral-200 sm:hover:shadow-md p-4 transition duration-200"
     >
       <LookPreviewBlock canvasItems={cover?.canvasItems ?? []} items={items} className="mb-3" />
-      <div>
-        <h3 className="text-sm font-medium text-neutral-900">{trip.name}</h3>
-        <p className="text-xs text-neutral-400 mt-0.5">
-          {looks.length} {looks.length === 1 ? "look" : "looks"}
-        </p>
-      </div>
-
-      <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition duration-150">
+      <div className="flex items-start justify-between">
+        <div>
+          <h3 className="text-sm font-medium text-neutral-900">{trip.name}</h3>
+          <p className="text-xs text-neutral-400 mt-0.5">
+            {looks.length} {looks.length === 1 ? "look" : "looks"}
+          </p>
+        </div>
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onOpen();
+            if (confirm(`Delete "${trip.name}"? Looks stay in your archive, just ungrouped.`)) onDelete();
           }}
-          title="Edit"
-          className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 text-xs leading-none"
-        >
-          ✎
-        </button>
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (
-              confirm(
-                `Are you sure you want to delete "${trip.name}"? This action cannot be undone. Looks stay in your archive, just ungrouped.`
-              )
-            )
-              onDelete();
-          }}
-          title="Delete"
-          className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-900 text-white hover:bg-neutral-800 shadow-sm transition duration-150 text-xs leading-none"
+          className="opacity-0 group-hover:opacity-100 text-neutral-300 hover:text-red-500 transition duration-150 text-sm"
         >
           ×
         </button>
@@ -781,7 +764,7 @@ export function TripDetailView({
   const tripLooks = looks.filter((l) => l.tripId === trip.id);
 
   async function handleDelete(look: Look) {
-    if (!confirm(`Delete "${look.name}"?`)) return;
+    if (!confirm(`Are you sure you want to delete "${look.name}"? This action cannot be undone.`)) return;
     try {
       await onDeleteLook(look.id);
     } catch (err) {
@@ -812,25 +795,36 @@ export function TripDetailView({
             <div
               key={look.id}
               onClick={() => onEditLook(look)}
-              className="group relative cursor-pointer rounded-2xl border border-neutral-100 hover:border-neutral-200 hover:shadow-md p-4 transition duration-200"
+              className="group relative cursor-pointer rounded-2xl border border-neutral-100 sm:hover:border-neutral-200 sm:hover:shadow-md p-4 transition duration-200"
             >
               <LookPreviewBlock canvasItems={look.canvasItems} items={items} className="mb-3" />
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-neutral-900">{look.name}</span>
+              <span className="text-sm text-neutral-900">{look.name}</span>
+
+              {/* z-[100]: LookPreviewBlock's item images carry their own
+                  explicit z-index (from canvas stacking order), which
+                  otherwise renders above these buttons and swallows their
+                  clicks regardless of DOM order. */}
+              <div className="absolute top-4 right-4 z-[100] flex flex-col gap-2">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEditLook(look);
+                  }}
+                  title="Edit"
+                  className="hidden sm:flex sm:opacity-0 sm:group-hover:opacity-100 w-7 h-7 items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 text-xs leading-none"
+                >
+                  ✎
+                </button>
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
                     handleDelete(look);
                   }}
-                  className="text-neutral-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition duration-150 text-sm"
+                  title="Delete"
+                  className="flex sm:opacity-0 sm:group-hover:opacity-100 w-7 h-7 items-center justify-center rounded-full bg-neutral-900 text-white hover:bg-neutral-800 shadow-sm transition duration-150 text-xs leading-none"
                 >
                   ×
                 </button>
-              </div>
-              <div className="absolute inset-0 z-[100] rounded-2xl bg-black/0 group-hover:bg-black/40 transition duration-200 flex items-center justify-center pointer-events-none">
-                <span className="px-4 py-1.5 rounded-full bg-white text-neutral-900 text-sm font-medium opacity-0 group-hover:opacity-100 transition duration-200">
-                  Edit
-                </span>
               </div>
             </div>
           ))}

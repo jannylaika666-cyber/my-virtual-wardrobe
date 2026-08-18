@@ -588,7 +588,7 @@ function WardrobePanel({
                 }}
                 onDragEnd={onItemDragEnd}
                 onClick={() => addToCanvas(item.id)}
-                className="group relative rounded-xl border border-neutral-100 bg-neutral-50 aspect-square flex items-center justify-center cursor-grab active:cursor-grabbing hover:shadow-md hover:border-neutral-200 transition duration-200"
+                className="group relative rounded-xl border border-neutral-100 bg-neutral-50 aspect-square flex items-center justify-center cursor-grab active:cursor-grabbing sm:hover:shadow-md sm:hover:border-neutral-200 transition duration-200"
                 title="Click or drag onto the canvas"
               >
                 <div className="relative w-[80%] h-[80%]">
