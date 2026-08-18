@@ -474,6 +474,20 @@ function useWardrobeStore() {
     [createTrip, supabase]
   );
 
+  // Overwrites an existing look's canvas arrangement in place (used when
+  // re-editing a look from Trips) instead of inserting a new row.
+  const updateLook = useCallback(
+    async (id: string, currentCanvasItems: CanvasItem[]) => {
+      const { error: updateError } = await supabase
+        .from("looks")
+        .update({ canvas_items: currentCanvasItems })
+        .eq("id", id);
+      if (updateError) throw updateError;
+      setLooks((s) => s.map((l) => (l.id === id ? { ...l, canvasItems: currentCanvasItems } : l)));
+    },
+    [supabase]
+  );
+
   const deleteLook = useCallback(
     async (id: string) => {
       const { error: deleteError } = await supabase.from("looks").delete().eq("id", id);
@@ -502,6 +516,7 @@ function useWardrobeStore() {
     createTrip,
     deleteTrip,
     saveLook,
+    updateLook,
     deleteLook,
   };
 }
@@ -602,22 +617,39 @@ function TripCard({
   return (
     <div
       onClick={onOpen}
-      className="group cursor-pointer rounded-2xl border border-neutral-100 hover:border-neutral-200 hover:shadow-md p-4 transition duration-200"
+      className="group relative cursor-pointer rounded-2xl border border-neutral-100 hover:border-neutral-200 hover:shadow-md p-4 transition duration-200"
     >
       <LookPreviewBlock canvasItems={cover?.canvasItems ?? []} items={items} className="mb-3" />
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-medium text-neutral-900">{trip.name}</h3>
-          <p className="text-xs text-neutral-400 mt-0.5">
-            {looks.length} {looks.length === 1 ? "look" : "looks"}
-          </p>
-        </div>
+      <div>
+        <h3 className="text-sm font-medium text-neutral-900">{trip.name}</h3>
+        <p className="text-xs text-neutral-400 mt-0.5">
+          {looks.length} {looks.length === 1 ? "look" : "looks"}
+        </p>
+      </div>
+
+      <div className="absolute top-4 right-4 flex flex-col gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition duration-150">
         <button
           onClick={(e) => {
             e.stopPropagation();
-            if (confirm(`Delete "${trip.name}"? Looks stay in your archive, just ungrouped.`)) onDelete();
+            onOpen();
           }}
-          className="opacity-0 group-hover:opacity-100 text-neutral-300 hover:text-red-500 transition duration-150 text-sm"
+          title="Edit"
+          className="w-7 h-7 flex items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 text-xs leading-none"
+        >
+          ✎
+        </button>
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            if (
+              confirm(
+                `Are you sure you want to delete "${trip.name}"? This action cannot be undone. Looks stay in your archive, just ungrouped.`
+              )
+            )
+              onDelete();
+          }}
+          title="Delete"
+          className="w-7 h-7 flex items-center justify-center rounded-full bg-neutral-900 text-white hover:bg-neutral-800 shadow-sm transition duration-150 text-xs leading-none"
         >
           ×
         </button>

@@ -188,6 +188,7 @@ function MatchCanvas({
   onRequestSave,
   onOpenSidebar,
   draggingItemId,
+  isEditingLook,
 }: {
   items: WardrobeItem[];
   canvasItems: CanvasItem[];
@@ -199,6 +200,7 @@ function MatchCanvas({
   onRequestSave: () => void;
   onOpenSidebar: () => void;
   draggingItemId: string | null;
+  isEditingLook: boolean;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [previewPos, setPreviewPos] = useState<{ x: number; y: number } | null>(null);
@@ -260,7 +262,7 @@ function MatchCanvas({
             disabled={canvasItems.length === 0}
             className="text-xs bg-neutral-900 text-white px-3.5 py-1.5 rounded-full hover:bg-neutral-800 disabled:opacity-30 transition duration-150"
           >
-            Save look
+            {isEditingLook ? "Update look" : "Save look"}
           </button>
         </div>
       </div>
@@ -989,18 +991,50 @@ export default function WardrobePage({
   const [categoryTab, setCategoryTab] = useState<Category | "All">("All");
   const [draggingItemId, setDraggingItemId] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [editingLookId, setEditingLookId] = useState<string | null>(null);
+  const [editingLookTripId, setEditingLookTripId] = useState<string | null>(null);
+  const [showOverwriteConfirm, setShowOverwriteConfirm] = useState(false);
+  const [overwriteSaving, setOverwriteSaving] = useState(false);
+  const [overwriteError, setOverwriteError] = useState<string | null>(null);
   const loadedEditLookRef = useRef<string | null>(null);
 
   // Coming from "Edit" on a trip's look (/app/wardrobe?editLook=<id>): load
-  // that look onto the canvas once, then strip the query param.
+  // that look onto the canvas once, remember its id so "Save look" later
+  // overwrites this same row instead of inserting a new one, then strip
+  // the query param.
   useEffect(() => {
     if (!editLook || store.loading || loadedEditLookRef.current === editLook) return;
     const look = store.looks.find((l) => l.id === editLook);
     if (!look) return;
     store.loadLookOntoCanvas(look);
+    // Reacting to a URL search param that arrives once the store finishes
+    // loading — there's no render-time value to derive this from.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEditingLookId(look.id);
+    setEditingLookTripId(look.tripId);
     loadedEditLookRef.current = editLook;
     router.replace("/app/wardrobe");
   }, [editLook, store, router]);
+
+  async function handleConfirmOverwrite() {
+    if (!editingLookId) return;
+    setOverwriteSaving(true);
+    setOverwriteError(null);
+    try {
+      await store.updateLook(editingLookId, store.canvasItems);
+      setShowOverwriteConfirm(false);
+      setEditingLookId(null);
+      // Back to where this look lives — its trip, or the Trips list if it
+      // was never archived into one.
+      router.push(editingLookTripId ? `/app/trip/${editingLookTripId}` : "/app/trip");
+      setEditingLookTripId(null);
+    } catch (err) {
+      console.error(err);
+      setOverwriteError("Couldn't save this look. Check your connection and try again.");
+    } finally {
+      setOverwriteSaving(false);
+    }
+  }
 
   // Warn before closing the tab/browser if there's an in-progress canvas
   // arrangement that hasn't been saved as a look yet. Browsers ignore any
@@ -1043,10 +1077,22 @@ export default function WardrobePage({
         updateCanvasItem={store.updateCanvasItem}
         bringToFront={store.bringToFront}
         removeFromCanvas={store.removeFromCanvas}
-        clearCanvas={store.clearCanvas}
-        onRequestSave={() => setShowSave(true)}
+        clearCanvas={() => {
+          store.clearCanvas();
+          setEditingLookId(null);
+          setEditingLookTripId(null);
+        }}
+        onRequestSave={() => {
+          if (editingLookId) {
+            setOverwriteError(null);
+            setShowOverwriteConfirm(true);
+          } else {
+            setShowSave(true);
+          }
+        }}
         onOpenSidebar={() => setSidebarOpen(true)}
         draggingItemId={draggingItemId}
+        isEditingLook={!!editingLookId}
       />
       <WardrobePanel
         open={sidebarOpen}
@@ -1087,6 +1133,33 @@ export default function WardrobePage({
           onClose={() => setShowSave(false)}
           onSave={(name, tripId, newTripName) => store.saveLook(store.canvasItems, name, tripId, newTripName)}
         />
+      )}
+      {showOverwriteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 backdrop-blur-sm px-4">
+          <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl border border-neutral-100 p-6">
+            <h2 className="text-sm font-medium text-neutral-900 mb-2">Overwrite this look?</h2>
+            <p className="text-sm text-neutral-500 mb-5">
+              Saving will replace the current arrangement for this look. This can&apos;t be undone.
+            </p>
+            {overwriteError && <p className="text-xs text-red-500 mb-4">{overwriteError}</p>}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowOverwriteConfirm(false)}
+                disabled={overwriteSaving}
+                className="flex-1 rounded-lg border border-neutral-200 text-neutral-600 text-sm py-2.5 hover:bg-neutral-50 disabled:opacity-50 transition duration-150"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmOverwrite}
+                disabled={overwriteSaving}
+                className="flex-1 rounded-lg bg-neutral-900 text-white text-sm py-2.5 hover:bg-neutral-800 disabled:opacity-50 transition duration-150"
+              >
+                {overwriteSaving ? "Saving…" : "Save & Overwrite"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
