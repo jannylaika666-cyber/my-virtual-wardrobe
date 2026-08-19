@@ -611,7 +611,7 @@ function WardrobePanel({
                       onEditItem(item);
                     }}
                     title="Edit"
-                    className="hidden sm:flex sm:opacity-0 sm:group-hover:opacity-100 w-7 h-7 items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 text-xs leading-none"
+                    className="flex sm:opacity-0 sm:group-hover:opacity-100 w-7 h-7 items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 text-xs leading-none"
                   >
                     ✎
                   </button>
