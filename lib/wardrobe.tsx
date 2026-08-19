@@ -627,10 +627,11 @@ function TripCard({
         </p>
       </div>
 
-      {/* z-[100]: the cover look's item images carry their own explicit
-          z-index, which otherwise renders above these buttons and
-          swallows their clicks regardless of DOM order. */}
-      <div className="absolute top-4 right-4 z-[100] flex flex-col gap-2">
+      {/* z-[9999]: the cover look's item images carry their own explicit
+          z-index (unbounded — it grows every time an item is dragged or
+          resized on the canvas), which otherwise renders above these
+          buttons and swallows their clicks regardless of DOM order. */}
+      <div className="absolute top-4 right-4 z-[9999] flex flex-col gap-2">
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -815,11 +816,12 @@ export function TripDetailView({
               <LookPreviewBlock canvasItems={look.canvasItems} items={items} className="mb-3" />
               <span className="text-sm text-neutral-900">{look.name}</span>
 
-              {/* z-[100]: LookPreviewBlock's item images carry their own
-                  explicit z-index (from canvas stacking order), which
-                  otherwise renders above these buttons and swallows their
-                  clicks regardless of DOM order. */}
-              <div className="absolute top-4 right-4 z-[100] flex flex-col gap-2">
+              {/* z-[9999]: LookPreviewBlock's item images carry their own
+                  explicit z-index (unbounded — it grows every time an item
+                  is dragged or resized on the canvas), which otherwise
+                  renders above these buttons and swallows their clicks
+                  regardless of DOM order. */}
+              <div className="absolute top-4 right-4 z-[9999] flex flex-col gap-2">
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
