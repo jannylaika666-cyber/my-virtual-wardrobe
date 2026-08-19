@@ -617,22 +617,37 @@ function TripCard({
   return (
     <div
       onClick={onOpen}
-      className="group cursor-pointer rounded-2xl border border-neutral-100 sm:hover:border-neutral-200 sm:hover:shadow-md p-4 transition duration-200"
+      className="group relative cursor-pointer rounded-2xl border border-neutral-100 sm:hover:border-neutral-200 sm:hover:shadow-md p-4 transition duration-200"
     >
       <LookPreviewBlock canvasItems={cover?.canvasItems ?? []} items={items} className="mb-3" />
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="text-sm font-medium text-neutral-900">{trip.name}</h3>
-          <p className="text-xs text-neutral-400 mt-0.5">
-            {looks.length} {looks.length === 1 ? "look" : "looks"}
-          </p>
-        </div>
+      <div>
+        <h3 className="text-sm font-medium text-neutral-900">{trip.name}</h3>
+        <p className="text-xs text-neutral-400 mt-0.5">
+          {looks.length} {looks.length === 1 ? "look" : "looks"}
+        </p>
+      </div>
+
+      {/* z-[100]: the cover look's item images carry their own explicit
+          z-index, which otherwise renders above these buttons and
+          swallows their clicks regardless of DOM order. */}
+      <div className="absolute top-4 right-4 z-[100] flex flex-col gap-2">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          title="Edit"
+          className="hidden sm:flex sm:opacity-0 sm:group-hover:opacity-100 w-7 h-7 items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 text-xs leading-none"
+        >
+          ✎
+        </button>
         <button
           onClick={(e) => {
             e.stopPropagation();
             if (confirm(`Delete "${trip.name}"? Looks stay in your archive, just ungrouped.`)) onDelete();
           }}
-          className="opacity-0 group-hover:opacity-100 text-neutral-300 hover:text-red-500 transition duration-150 text-sm"
+          title="Delete"
+          className="flex sm:opacity-0 sm:group-hover:opacity-100 w-7 h-7 items-center justify-center rounded-full bg-neutral-900 text-white hover:bg-neutral-800 shadow-sm transition duration-150 text-xs leading-none"
         >
           ×
         </button>

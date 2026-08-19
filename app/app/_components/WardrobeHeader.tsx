@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useWardrobeStoreContext } from "@/lib/wardrobe";
 
 function tabClass(active: boolean): string {
   return `px-3 py-1.5 text-sm rounded-full transition duration-200 ${
@@ -14,8 +15,15 @@ function tabClass(active: boolean): string {
 export default function WardrobeHeader() {
   const pathname = usePathname();
   const router = useRouter();
+  const store = useWardrobeStoreContext();
   const [signingOut, setSigningOut] = useState(false);
   const isTrips = pathname.startsWith("/app/trip");
+
+  function handleLogoClick(e: React.MouseEvent) {
+    e.preventDefault();
+    store.clearCanvas();
+    router.push("/app/wardrobe");
+  }
 
   async function handleLogout() {
     if (signingOut) return;
@@ -28,7 +36,13 @@ export default function WardrobeHeader() {
 
   return (
     <header className="border-b border-neutral-100 px-6 py-4 flex items-center justify-between shrink-0">
-      <span className="text-[15px] font-medium tracking-tight">Wardrobe</span>
+      <Link
+        href="/app/wardrobe"
+        onClick={handleLogoClick}
+        className="text-[15px] font-medium tracking-tight hover:text-neutral-600 transition duration-150"
+      >
+        Wardrobe
+      </Link>
       <nav className="flex items-center gap-1">
         <Link href="/app/wardrobe" className={tabClass(!isTrips)}>
           Matcher
