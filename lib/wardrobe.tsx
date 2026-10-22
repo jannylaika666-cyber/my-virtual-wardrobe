@@ -29,6 +29,8 @@ import { createClient, WARDROBE_BUCKET } from "@/lib/supabase/client";
 export const CATEGORIES = [
   "Top",
   "Bottom",
+  "Set",
+  "Full Body",
   "Accessory",
   "Bag",
   "Footwear",
