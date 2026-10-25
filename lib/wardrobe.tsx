@@ -205,6 +205,9 @@ function useWardrobeStore() {
   const [looks, setLooks] = useState<Look[]>([]);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [canvasItems, setCanvasItems] = useState<CanvasItem[]>([]);
+  // Name of the look currently on the canvas. Lives next to canvasItems so it
+  // survives navigating to Trips and back, and resets whenever the canvas does.
+  const [lookName, setLookName] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -414,10 +417,14 @@ function useWardrobeStore() {
     setCanvasItems((s) => s.filter((c) => c.id !== id));
   }, []);
 
-  const clearCanvas = useCallback(() => setCanvasItems([]), []);
+  const clearCanvas = useCallback(() => {
+    setCanvasItems([]);
+    setLookName("");
+  }, []);
 
   const loadLookOntoCanvas = useCallback((look: Look) => {
     setCanvasItems(look.canvasItems.map((c) => ({ ...c, id: makeId() })));
+    setLookName(look.name);
   }, []);
 
   const createTrip = useCallback(
@@ -476,16 +483,28 @@ function useWardrobeStore() {
     [createTrip, supabase]
   );
 
-  // Overwrites an existing look's canvas arrangement in place (used when
-  // re-editing a look from Trips) instead of inserting a new row.
+  // Overwrites an existing look's canvas arrangement (and name, when given)
+  // in place — used when re-editing a look from Trips — instead of inserting
+  // a new row.
   const updateLook = useCallback(
-    async (id: string, currentCanvasItems: CanvasItem[]) => {
+    async (id: string, currentCanvasItems: CanvasItem[], name?: string) => {
+      const trimmedName = name?.trim();
       const { error: updateError } = await supabase
         .from("looks")
-        .update({ canvas_items: currentCanvasItems })
+        .update(
+          trimmedName
+            ? { canvas_items: currentCanvasItems, name: trimmedName }
+            : { canvas_items: currentCanvasItems }
+        )
         .eq("id", id);
       if (updateError) throw updateError;
-      setLooks((s) => s.map((l) => (l.id === id ? { ...l, canvasItems: currentCanvasItems } : l)));
+      setLooks((s) =>
+        s.map((l) =>
+          l.id === id
+            ? { ...l, canvasItems: currentCanvasItems, ...(trimmedName ? { name: trimmedName } : {}) }
+            : l
+        )
+      );
     },
     [supabase]
   );
@@ -504,6 +523,8 @@ function useWardrobeStore() {
     looks,
     trips,
     canvasItems,
+    lookName,
+    setLookName,
     loading,
     error,
     addItem,

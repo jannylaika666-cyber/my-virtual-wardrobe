@@ -189,6 +189,8 @@ function MatchCanvas({
   onOpenSidebar,
   draggingItemId,
   isEditingLook,
+  lookName,
+  onRenameLook,
 }: {
   items: WardrobeItem[];
   canvasItems: CanvasItem[];
@@ -201,12 +203,30 @@ function MatchCanvas({
   onOpenSidebar: () => void;
   draggingItemId: string | null;
   isEditingLook: boolean;
+  lookName: string;
+  onRenameLook: (name: string) => void;
 }) {
   const [isDragOver, setIsDragOver] = useState(false);
   const [previewPos, setPreviewPos] = useState<{ x: number; y: number } | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
+  const skipNameCommit = useRef(false);
   const itemMap = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const draggingItem = draggingItemId ? itemMap.get(draggingItemId) ?? null : null;
+
+  function startEditName() {
+    setNameDraft(lookName);
+    setEditingName(true);
+  }
+
+  function commitName() {
+    const trimmed = nameDraft.trim();
+    // A saved look always keeps a name; only a brand-new one may be left
+    // blank (it shows the placeholder, then falls back to "Untitled look").
+    if (trimmed || !isEditingLook) onRenameLook(trimmed);
+    setEditingName(false);
+  }
 
   function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
     e.preventDefault();
@@ -236,7 +256,7 @@ function MatchCanvas({
       <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100">
         <div>
           <h2 className="text-sm font-medium text-neutral-900">Mix & match</h2>
-          <p className="text-xs text-neutral-400 mt-0.5">
+          <p className="hidden sm:block text-xs text-neutral-400 mt-0.5">
             Drag items here, then resize and arrange your look
           </p>
         </div>
@@ -251,8 +271,9 @@ function MatchCanvas({
             onClick={() => {
               clearCanvas();
               setSelectedId(null);
+              setEditingName(false);
             }}
-            disabled={canvasItems.length === 0}
+            disabled={canvasItems.length === 0 && !lookName}
             className="text-xs text-neutral-500 hover:text-neutral-900 disabled:opacity-30 disabled:hover:text-neutral-500 px-3 py-1.5 rounded-full border border-neutral-200 transition duration-150"
           >
             Clear
@@ -267,7 +288,57 @@ function MatchCanvas({
         </div>
       </div>
 
-      <div className="flex-1 overflow-auto p-6">
+      {/* Look name — sits just above the canvas. Blank (new look) shows the
+          placeholder; Edit name swaps it for an inline input. */}
+      <div className="px-6 pt-5">
+        <div className="h-9 flex items-center gap-3">
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameDraft}
+              maxLength={60}
+              aria-label="Look name"
+              placeholder="Name of this look"
+              onChange={(e) => setNameDraft(e.target.value)}
+              onFocus={(e) => e.currentTarget.select()}
+              onBlur={() => {
+                if (skipNameCommit.current) {
+                  skipNameCommit.current = false;
+                  return;
+                }
+                commitName();
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.currentTarget.blur();
+                } else if (e.key === "Escape") {
+                  skipNameCommit.current = true;
+                  setEditingName(false);
+                }
+              }}
+              className="w-full max-w-sm h-9 rounded-lg border border-neutral-200 bg-white px-3 text-base tracking-tight text-neutral-900 focus:outline-none focus:ring-1 focus:ring-neutral-900"
+            />
+          ) : (
+            <>
+              <h3
+                className={`min-w-0 truncate text-base tracking-tight ${
+                  lookName ? "font-medium text-neutral-900" : "text-neutral-400"
+                }`}
+              >
+                {lookName || "Name of this look"}
+              </h3>
+              <button
+                onClick={startEditName}
+                className="shrink-0 text-xs text-neutral-500 hover:text-neutral-900 px-3 py-1.5 rounded-full border border-neutral-200 transition duration-150"
+              >
+                Edit name
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto px-6 pb-6 pt-4">
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -860,14 +931,16 @@ function UploadModal({
 
 function SaveLookModal({
   trips,
+  initialName,
   onClose,
   onSave,
 }: {
   trips: Trip[];
+  initialName: string;
   onClose: () => void;
   onSave: (name: string, tripId: string | null, newTripName?: string) => Promise<unknown>;
 }) {
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName);
   const [tripMode, setTripMode] = useState<"none" | "existing" | "new">(
     trips.length > 0 ? "existing" : "new"
   );
@@ -1026,7 +1099,7 @@ export default function WardrobePage({
     setOverwriteSaving(true);
     setOverwriteError(null);
     try {
-      await store.updateLook(editingLookId, store.canvasItems);
+      await store.updateLook(editingLookId, store.canvasItems, store.lookName);
       setShowOverwriteConfirm(false);
       setEditingLookId(null);
       // Back to where this look lives — its trip, or the Trips list if it
@@ -1098,6 +1171,8 @@ export default function WardrobePage({
         onOpenSidebar={() => setSidebarOpen(true)}
         draggingItemId={draggingItemId}
         isEditingLook={!!editingLookId}
+        lookName={store.lookName}
+        onRenameLook={store.setLookName}
       />
       <WardrobePanel
         open={sidebarOpen}
@@ -1135,8 +1210,13 @@ export default function WardrobePage({
       {showSave && (
         <SaveLookModal
           trips={store.trips}
+          initialName={store.lookName}
           onClose={() => setShowSave(false)}
-          onSave={(name, tripId, newTripName) => store.saveLook(store.canvasItems, name, tripId, newTripName)}
+          onSave={(name, tripId, newTripName) => {
+            // Keep the name shown above the canvas in sync with what was saved.
+            store.setLookName(name.trim());
+            return store.saveLook(store.canvasItems, name, tripId, newTripName);
+          }}
         />
       )}
       {showOverwriteConfirm && (
@@ -1144,7 +1224,8 @@ export default function WardrobePage({
           <div className="w-full max-w-sm rounded-2xl bg-white shadow-xl border border-neutral-100 p-6">
             <h2 className="text-sm font-medium text-neutral-900 mb-2">Overwrite this look?</h2>
             <p className="text-sm text-neutral-500 mb-5">
-              Saving will replace the current arrangement for this look. This can&apos;t be undone.
+              Saving will replace the arrangement and name of &ldquo;{store.lookName.trim() || "this look"}&rdquo;.
+              This can&apos;t be undone.
             </p>
             {overwriteError && <p className="text-xs text-red-500 mb-4">{overwriteError}</p>}
             <div className="flex gap-2">
