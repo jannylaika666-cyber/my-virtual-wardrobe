@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import Image from "next/image";
@@ -99,6 +100,7 @@ export interface Look {
   name: string;
   canvasItems: CanvasItem[];
   tripId: string | null;
+  position: number | null; // manual order within its trip; null until first reordered
   createdAt: number;
 }
 
@@ -166,8 +168,21 @@ function mapLookRow(row: Row): Look {
     name: row.name,
     canvasItems: Array.isArray(row.canvas_items) ? (row.canvas_items as CanvasItem[]) : [],
     tripId: row.trip_id ?? null,
+    position: row.position ?? null,
     createdAt: new Date(row.created_at).getTime(),
   };
+}
+
+// Display order for a trip's looks. Looks dragged into place carry a
+// position; ones saved since (position null) stay on top, newest first —
+// the same order as before reordering existed.
+function sortLooks(looks: Look[]): Look[] {
+  return [...looks].sort((a, b) => {
+    if (a.position === null && b.position === null) return b.createdAt - a.createdAt;
+    if (a.position === null) return -1;
+    if (b.position === null) return 1;
+    return a.position - b.position;
+  });
 }
 
 function mapTripRow(row: Row): Trip {
@@ -518,6 +533,35 @@ function useWardrobeStore() {
     [supabase]
   );
 
+  // Persists a trip's new look order (ids in display order). Applied
+  // optimistically so the dropped card stays put; rolled back on failure.
+  const reorderLooks = useCallback(
+    async (orderedIds: string[]) => {
+      const positions = new Map(orderedIds.map((id, i) => [id, i]));
+      // Filled in by the updater, which has always run by the time the
+      // network round-trip below resolves.
+      const previousPositions = new Map<string, number | null>();
+      setLooks((s) =>
+        s.map((l) => {
+          if (!positions.has(l.id)) return l;
+          previousPositions.set(l.id, l.position);
+          return { ...l, position: positions.get(l.id)! };
+        })
+      );
+      const results = await Promise.all(
+        orderedIds.map((id, i) => supabase.from("looks").update({ position: i }).eq("id", id))
+      );
+      const failed = results.find((r) => r.error);
+      if (failed?.error) {
+        setLooks((s) =>
+          s.map((l) => (previousPositions.has(l.id) ? { ...l, position: previousPositions.get(l.id)! } : l))
+        );
+        throw failed.error;
+      }
+    },
+    [supabase]
+  );
+
   return {
     items,
     looks,
@@ -541,6 +585,7 @@ function useWardrobeStore() {
     saveLook,
     updateLook,
     deleteLook,
+    reorderLooks,
   };
 }
 
@@ -767,7 +812,8 @@ export function TripsView({
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {trips.map((trip) => {
-            const tripLooks = looks.filter((l) => l.tripId === trip.id);
+            // Sorted so the cover is the first look in the trip's own order.
+            const tripLooks = sortLooks(looks.filter((l) => l.tripId === trip.id));
             return (
               <TripCard
                 key={trip.id}
@@ -792,6 +838,7 @@ export function TripDetailView({
   onBack,
   onDeleteLook,
   onEditLook,
+  onReorderLooks,
 }: {
   trip: Trip;
   looks: Look[];
@@ -799,8 +846,87 @@ export function TripDetailView({
   onBack: () => void;
   onDeleteLook: (id: string) => Promise<unknown>;
   onEditLook: (look: Look) => void;
+  onReorderLooks: (orderedIds: string[]) => Promise<unknown>;
 }) {
-  const tripLooks = looks.filter((l) => l.tripId === trip.id);
+  const sortedLooks = sortLooks(looks.filter((l) => l.tripId === trip.id));
+  // While a drag is in progress the grid renders this local order instead,
+  // so cards shuffle live under the pointer without touching the store.
+  const [dragOrder, setDragOrder] = useState<string[] | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  const lookById = new Map(sortedLooks.map((l) => [l.id, l]));
+  const tripLooks = dragOrder
+    ? dragOrder.map((id) => lookById.get(id)).filter((l): l is Look => !!l)
+    : sortedLooks;
+
+  // Drag starts from the handle only (touch-action: none there), so tapping
+  // a card still opens it and swiping elsewhere still scrolls on mobile.
+  function handleGripPointerDown(e: React.PointerEvent<HTMLButtonElement>, lookId: string) {
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const initialOrder = sortedLooks.map((l) => l.id);
+    let order = initialOrder;
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+    setDragOrder(order);
+    setDraggingId(lookId);
+
+    // Moves the dragged card into the slot of whichever card is under the
+    // pointer. The swapped card lands in the dragged card's old slot, away
+    // from the pointer, so this doesn't flip back and forth.
+    function reorderUnderPointer() {
+      for (const [id, el] of cardRefs.current) {
+        if (id === lookId) continue;
+        const r = el.getBoundingClientRect();
+        if (lastX < r.left || lastX > r.right || lastY < r.top || lastY > r.bottom) continue;
+        const next = order.filter((x) => x !== lookId);
+        next.splice(order.indexOf(id), 0, lookId);
+        order = next;
+        setDragOrder(order);
+        return;
+      }
+    }
+
+    // Trips pages scroll inside <main> (see app/app/layout.tsx), not the
+    // window — nudge it while the pointer sits near its top/bottom edge.
+    const scroller = e.currentTarget.closest("main");
+    let frame = requestAnimationFrame(function autoScroll() {
+      if (scroller) {
+        const r = scroller.getBoundingClientRect();
+        const before = scroller.scrollTop;
+        if (lastY < r.top + 64) scroller.scrollTop -= 12;
+        else if (lastY > r.bottom - 64) scroller.scrollTop += 12;
+        if (scroller.scrollTop !== before) reorderUnderPointer();
+      }
+      frame = requestAnimationFrame(autoScroll);
+    });
+
+    function onMove(ev: PointerEvent) {
+      lastX = ev.clientX;
+      lastY = ev.clientY;
+      reorderUnderPointer();
+    }
+    function onUp() {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
+      setDraggingId(null);
+      if (order.some((id, i) => id !== initialOrder[i])) {
+        // reorderLooks updates the store synchronously before its network
+        // call, so clearing dragOrder below doesn't flash the old order.
+        onReorderLooks(order).catch((err) => {
+          console.error(err);
+          alert("Couldn't save the new order. Check your connection and try again.");
+        });
+      }
+      setDragOrder(null);
+    }
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onUp);
+  }
 
   async function handleDelete(look: Look) {
     if (!confirm(`Are you sure you want to delete "${look.name}"? This action cannot be undone.`)) return;
@@ -833,11 +959,41 @@ export function TripDetailView({
           {tripLooks.map((look) => (
             <div
               key={look.id}
+              ref={(el) => {
+                if (el) cardRefs.current.set(look.id, el);
+                else cardRefs.current.delete(look.id);
+              }}
               onClick={() => onEditLook(look)}
-              className="group relative cursor-pointer rounded-2xl border border-neutral-100 sm:hover:border-neutral-200 sm:hover:shadow-md p-4 transition duration-200"
+              className={`group relative cursor-pointer rounded-2xl border p-4 transition duration-200 ${
+                draggingId === look.id
+                  ? "border-neutral-900 shadow-lg opacity-80"
+                  : "border-neutral-100 sm:hover:border-neutral-200 sm:hover:shadow-md"
+              }`}
             >
               <LookPreviewBlock canvasItems={look.canvasItems} items={items} className="mb-3" />
               <span className="text-sm text-neutral-900">{look.name}</span>
+
+              {/* Same z-[9999] reasoning as the Edit/Delete column below. */}
+              <div className="absolute top-4 left-4 z-[9999]">
+                <button
+                  onPointerDown={(e) => handleGripPointerDown(e, look.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  title="Drag to reorder"
+                  style={{ touchAction: "none" }}
+                  className={`flex w-7 h-7 items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 cursor-grab active:cursor-grabbing ${
+                    draggingId === look.id ? "" : "sm:opacity-0 sm:group-hover:opacity-100"
+                  }`}
+                >
+                  <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="2.5" cy="2.5" r="1.25" />
+                    <circle cx="7.5" cy="2.5" r="1.25" />
+                    <circle cx="2.5" cy="7" r="1.25" />
+                    <circle cx="7.5" cy="7" r="1.25" />
+                    <circle cx="2.5" cy="11.5" r="1.25" />
+                    <circle cx="7.5" cy="11.5" r="1.25" />
+                  </svg>
+                </button>
+              </div>
 
               {/* z-[9999]: LookPreviewBlock's item images carry their own
                   explicit z-index (unbounded — it grows every time an item

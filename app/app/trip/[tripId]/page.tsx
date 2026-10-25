@@ -57,6 +57,7 @@ export default function TripDetailPage({
       items={store.items}
       onBack={() => router.push("/app/trip")}
       onDeleteLook={store.deleteLook}
+      onReorderLooks={store.reorderLooks}
       onEditLook={(look) => router.push(`/app/wardrobe?editLook=${look.id}`)}
     />
   );
