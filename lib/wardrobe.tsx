@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -853,39 +854,111 @@ export function TripDetailView({
   // so cards shuffle live under the pointer without touching the store.
   const [dragOrder, setDragOrder] = useState<string[] | null>(null);
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // Width of the floating copy that follows the pointer; null when idle.
+  const [floatWidth, setFloatWidth] = useState<number | null>(null);
   const cardRefs = useRef(new Map<string, HTMLDivElement>());
+  const gridRef = useRef<HTMLDivElement>(null);
+  const floatRef = useRef<HTMLDivElement>(null);
+  // The floating copy's position is written straight to its style on every
+  // pointer move (not via state) so dragging doesn't re-render the page.
+  const floatPos = useRef({ x: 0, y: 0 });
+  // On-screen rect of every card just before a reorder, for the FLIP slide.
+  const prevRects = useRef(new Map<string, DOMRect>());
   const lookById = new Map(sortedLooks.map((l) => [l.id, l]));
   const tripLooks = dragOrder
     ? dragOrder.map((id) => lookById.get(id)).filter((l): l is Look => !!l)
     : sortedLooks;
+  const draggingLook = draggingId ? lookById.get(draggingId) ?? null : null;
+
+  useLayoutEffect(() => {
+    const el = floatRef.current;
+    if (el) el.style.transform = floatTransform(floatPos.current.x, floatPos.current.y);
+  }, [floatWidth]);
+
+  // FLIP: after the grid re-renders in a new order, start each moved card at
+  // its old on-screen spot and let it transition into its new slot, instead
+  // of jumping there.
+  useLayoutEffect(() => {
+    const prev = prevRects.current;
+    if (prev.size === 0) return;
+    prevRects.current = new Map();
+    for (const [id, el] of cardRefs.current) {
+      const from = prev.get(id);
+      if (!from) continue;
+      el.style.transition = "none";
+      el.style.transform = "";
+      const to = el.getBoundingClientRect();
+      const dx = from.left - to.left;
+      const dy = from.top - to.top;
+      if (!dx && !dy) continue;
+      el.style.transform = `translate(${dx}px, ${dy}px)`;
+      el.getBoundingClientRect(); // commit the start position before animating
+      el.style.transition = `transform ${DRAG_SLIDE_MS}ms ${DRAG_EASE}`;
+      el.style.transform = "";
+      el.addEventListener("transitionend", () => (el.style.transition = ""), { once: true });
+    }
+  }, [dragOrder]);
 
   // Drag starts from the handle only (touch-action: none there), so tapping
   // a card still opens it and swiping elsewhere still scrolls on mobile.
   function handleGripPointerDown(e: React.PointerEvent<HTMLButtonElement>, lookId: string) {
+    if (draggingId) return; // previous drop still settling
     e.stopPropagation();
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
+    const card = cardRefs.current.get(lookId);
+    const grid = gridRef.current;
+    if (!card || !grid) return;
+
     const initialOrder = sortedLooks.map((l) => l.id);
     let order = initialOrder;
     let lastX = e.clientX;
     let lastY = e.clientY;
+    const cardBox = card.getBoundingClientRect();
+    const grabX = e.clientX - cardBox.left;
+    const grabY = e.clientY - cardBox.top;
+
+    // Grid slots never move during a drag (same cards, same grid) — only
+    // which look sits in each one changes — so hit-testing against these
+    // fixed slots can't flicker back and forth while cards are sliding.
+    const gridBox = grid.getBoundingClientRect();
+    const slots = initialOrder.map((id) => {
+      const r = cardRefs.current.get(id)!.getBoundingClientRect();
+      return {
+        left: r.left - gridBox.left,
+        top: r.top - gridBox.top,
+        right: r.right - gridBox.left,
+        bottom: r.bottom - gridBox.top,
+      };
+    });
+
+    floatPos.current = { x: cardBox.left, y: cardBox.top };
+    setFloatWidth(cardBox.width);
     setDragOrder(order);
     setDraggingId(lookId);
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
 
-    // Moves the dragged card into the slot of whichever card is under the
-    // pointer. The swapped card lands in the dragged card's old slot, away
-    // from the pointer, so this doesn't flip back and forth.
+    function moveFloat() {
+      floatPos.current = { x: lastX - grabX, y: lastY - grabY };
+      const el = floatRef.current;
+      if (el) el.style.transform = floatTransform(floatPos.current.x, floatPos.current.y);
+    }
+
     function reorderUnderPointer() {
-      for (const [id, el] of cardRefs.current) {
-        if (id === lookId) continue;
-        const r = el.getBoundingClientRect();
-        if (lastX < r.left || lastX > r.right || lastY < r.top || lastY > r.bottom) continue;
-        const next = order.filter((x) => x !== lookId);
-        next.splice(order.indexOf(id), 0, lookId);
-        order = next;
-        setDragOrder(order);
-        return;
-      }
+      const g = gridRef.current?.getBoundingClientRect();
+      if (!g) return;
+      const x = lastX - g.left;
+      const y = lastY - g.top;
+      const target = slots.findIndex((s) => x >= s.left && x <= s.right && y >= s.top && y <= s.bottom);
+      if (target === -1 || target === order.indexOf(lookId)) return;
+      const next = order.filter((id) => id !== lookId);
+      next.splice(target, 0, lookId);
+      const rects = new Map<string, DOMRect>();
+      for (const [id, el] of cardRefs.current) rects.set(id, el.getBoundingClientRect());
+      prevRects.current = rects;
+      order = next;
+      setDragOrder(order);
     }
 
     // Trips pages scroll inside <main> (see app/app/layout.tsx), not the
@@ -905,6 +978,7 @@ export function TripDetailView({
     function onMove(ev: PointerEvent) {
       lastX = ev.clientX;
       lastY = ev.clientY;
+      moveFloat();
       reorderUnderPointer();
     }
     function onUp() {
@@ -912,7 +986,8 @@ export function TripDetailView({
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
-      setDraggingId(null);
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
       if (order.some((id, i) => id !== initialOrder[i])) {
         // reorderLooks updates the store synchronously before its network
         // call, so clearing dragOrder below doesn't flash the old order.
@@ -921,7 +996,19 @@ export function TripDetailView({
           alert("Couldn't save the new order. Check your connection and try again.");
         });
       }
-      setDragOrder(null);
+      // Glide the floating copy into the card's final slot, then drop it.
+      const slot = cardRefs.current.get(lookId)?.getBoundingClientRect();
+      const el = floatRef.current;
+      if (slot && el) {
+        el.style.transition = `transform ${DRAG_DROP_MS}ms ${DRAG_EASE}, box-shadow ${DRAG_DROP_MS}ms`;
+        el.style.transform = `translate3d(${slot.left}px, ${slot.top}px, 0)`;
+        el.style.boxShadow = "none";
+      }
+      window.setTimeout(() => {
+        setDraggingId(null);
+        setDragOrder(null);
+        setFloatWidth(null);
+      }, DRAG_DROP_MS);
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -955,7 +1042,7 @@ export function TripDetailView({
       {tripLooks.length === 0 ? (
         <div className="text-center text-sm text-neutral-400 py-24">No looks archived here yet.</div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div ref={gridRef} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
           {tripLooks.map((look) => (
             <div
               key={look.id}
@@ -966,32 +1053,27 @@ export function TripDetailView({
               onClick={() => onEditLook(look)}
               className={`group relative cursor-pointer rounded-2xl border p-4 transition duration-200 ${
                 draggingId === look.id
-                  ? "border-neutral-900 shadow-lg opacity-80"
+                  ? // Empty slot marking where the floating card will land.
+                    "border-dashed border-neutral-300 bg-neutral-50 [&>*]:invisible"
                   : "border-neutral-100 sm:hover:border-neutral-200 sm:hover:shadow-md"
               }`}
             >
               <LookPreviewBlock canvasItems={look.canvasItems} items={items} className="mb-3" />
               <span className="text-sm text-neutral-900">{look.name}</span>
 
-              {/* Same z-[9999] reasoning as the Edit/Delete column below. */}
+              {/* Same z-[9999] reasoning as the Edit/Delete column below.
+                  Hidden until hover only with a mouse/trackpad
+                  (pointer-fine) — phones and iPads have no hover, so it
+                  always shows there regardless of screen width. */}
               <div className="absolute top-4 left-4 z-[9999]">
                 <button
                   onPointerDown={(e) => handleGripPointerDown(e, look.id)}
                   onClick={(e) => e.stopPropagation()}
                   title="Drag to reorder"
                   style={{ touchAction: "none" }}
-                  className={`flex w-7 h-7 items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150 cursor-grab active:cursor-grabbing ${
-                    draggingId === look.id ? "" : "sm:opacity-0 sm:group-hover:opacity-100"
-                  }`}
+                  className={`${GRIP_CLASS} pointer-fine:opacity-0 pointer-fine:group-hover:opacity-100 cursor-grab`}
                 >
-                  <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
-                    <circle cx="2.5" cy="2.5" r="1.25" />
-                    <circle cx="7.5" cy="2.5" r="1.25" />
-                    <circle cx="2.5" cy="7" r="1.25" />
-                    <circle cx="7.5" cy="7" r="1.25" />
-                    <circle cx="2.5" cy="11.5" r="1.25" />
-                    <circle cx="7.5" cy="11.5" r="1.25" />
-                  </svg>
+                  <GripIcon />
                 </button>
               </div>
 
@@ -1026,6 +1108,50 @@ export function TripDetailView({
           ))}
         </div>
       )}
+
+      {/* Floating copy of the dragged card. position: fixed so it tracks the
+          pointer in viewport coordinates even while <main> auto-scrolls;
+          its transform is set imperatively (see floatPos). */}
+      {draggingLook && floatWidth !== null && (
+        <div
+          ref={floatRef}
+          className="fixed left-0 top-0 z-[10000] pointer-events-none rounded-2xl border border-neutral-200 bg-white p-4 shadow-2xl"
+          style={{ width: floatWidth, willChange: "transform" }}
+        >
+          <LookPreviewBlock canvasItems={draggingLook.canvasItems} items={items} className="mb-3" />
+          <span className="text-sm text-neutral-900">{draggingLook.name}</span>
+          <div className="absolute top-4 left-4 z-[9999]">
+            <div className={GRIP_CLASS}>
+              <GripIcon />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  );
+}
+
+const DRAG_SLIDE_MS = 220;
+const DRAG_DROP_MS = 180;
+const DRAG_EASE = "cubic-bezier(0.2, 0.8, 0.2, 1)";
+
+const GRIP_CLASS =
+  "flex w-7 h-7 items-center justify-center rounded-full bg-white/90 border border-neutral-200 text-neutral-500 hover:text-neutral-900 shadow-sm transition duration-150";
+
+// Slight lift while dragging so the card reads as picked up.
+function floatTransform(x: number, y: number): string {
+  return `translate3d(${x}px, ${y}px, 0) scale(1.03)`;
+}
+
+function GripIcon() {
+  return (
+    <svg width="10" height="14" viewBox="0 0 10 14" fill="currentColor" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="2.5" cy="2.5" r="1.25" />
+      <circle cx="7.5" cy="2.5" r="1.25" />
+      <circle cx="2.5" cy="7" r="1.25" />
+      <circle cx="7.5" cy="7" r="1.25" />
+      <circle cx="2.5" cy="11.5" r="1.25" />
+      <circle cx="7.5" cy="11.5" r="1.25" />
+    </svg>
   );
 }
